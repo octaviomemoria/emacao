@@ -1,0 +1,11 @@
+{
+  "name": "Radar de Rompimentos",
+  "short_name": "Radar",
+  "description": "Sinais de compra e venda da estratégia Rompimento 100/10, carteira simulada e alertas.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#09090b",
+  "theme_color": "#09090b",
+  "lang": "pt-BR",
+  "icons": [{ "src": "/icons/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }]
+}
