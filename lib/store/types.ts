@@ -76,14 +76,25 @@ export interface Store {
   removePushSub(endpoint: string): Promise<void>;
   appendJobLog(e: JobLogEntry): Promise<void>;
   listJobLog(limit: number): Promise<JobLogEntry[]>;
-  // pregão simulado
-  getPregao(): Promise<PregaoState | null>;
-  savePregao(s: PregaoState | null): Promise<void>;
-  listOrders(): Promise<PregaoOrder[]>;
-  /** insere ou atualiza ordens pelo id */
+  // carteiras de pregão: a padrão ("pregao") e as carteiras simuladas (pid = id da carteira)
+  listCarteiras(): Promise<Carteira[]>;
+  saveCarteiras(list: Carteira[]): Promise<void>;
+  getPregao(pid?: string): Promise<PregaoState | null>;
+  savePregao(s: PregaoState | null, pid?: string): Promise<void>;
+  listOrders(pid?: string): Promise<PregaoOrder[]>;
+  /** insere ou atualiza ordens pelo id (cada ordem leva o seu portfolioId) */
   upsertOrders(list: PregaoOrder[]): Promise<void>;
-  listFills(): Promise<PregaoFill[]>;
+  listFills(pid?: string): Promise<PregaoFill[]>;
   addFills(list: PregaoFill[]): Promise<void>;
-  /** apaga o pregão simulado inteiro (estado, ordens e fills) */
-  clearPregao(): Promise<void>;
+  /** apaga o estado, as ordens e as execuções de uma carteira */
+  clearPregao(pid?: string): Promise<void>;
+}
+
+/** carteira simulada criada pelo usuário, com capital inicial e parâmetros próprios */
+export interface Carteira {
+  id: string;
+  name: string;
+  createdAt: string;
+  capital: number;
+  params: PregaoSettings;
 }

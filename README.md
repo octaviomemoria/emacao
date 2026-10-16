@@ -68,6 +68,11 @@ do pregão seguinte: abertura, máxima, mínima e volume **brutos** (sem ajuste 
 
 Para ativar no Supabase, rode `supabase/migrations/0002_pregao.sql` no SQL Editor (depois do `0001_init.sql`).
 
+## Carteiras simuladas
+Na tela **Simuladas** você cria quantas carteiras quiser, cada uma com **nome, capital inicial e parâmetros próprios** (deslizamento, participação no volume, emolumentos, corretagem e alerta de gap). Cada carteira opera como o pregão simulado (ordens digitadas, execução no pregão seguinte) e é independente das outras, da carteira padrão e da carteira real. Você pode alterar os parâmetros e zerar cada carteira. Os alertas de execução trazem o nome da carteira entre colchetes.
+
+As carteiras usam a migração `supabase/migrations/0003_carteiras_simuladas.sql`, que deve ser rodada depois da 0002.
+
 ## Limites conhecidos
 - Fonte de preços: endpoint não oficial do Yahoo Finance. Se mudar ou limitar acessos, o provedor está isolado em `lib/providers/yahoo.ts`.
 - O histórico guardado cobre cerca de 3 anos (configurável); o backtest completo 2000–2026 está na pesquisa em Python.

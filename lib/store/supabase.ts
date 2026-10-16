@@ -2,15 +2,18 @@ import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import type { Candle, SimState } from "@/lib/engine/types";
 import {
   DEFAULT_ASSETS, DEFAULT_SETTINGS,
-  type AlertItem, type Asset, type Channels, type JobLogEntry, type PushSub, type Settings, type Snapshot, type Store, type Tx,
+  type AlertItem, type Asset, type Carteira, type Channels, type JobLogEntry, type PushSub, type Settings, type Snapshot, type Store, type Tx,
 } from "./types";
-import type { PregaoFill, PregaoOrder, PregaoState } from "@/lib/engine/pregao";
+import { PREGAO_DEFAULT, type PregaoFill, type PregaoOrder, type PregaoState } from "@/lib/engine/pregao";
 
 type AlertRow = { id: string; created_at: string; type: string; ticker: string | null; title: string; body: string; read: boolean; dedupe: string };
 const toAlert = (r: AlertRow): AlertItem => ({
   id: r.id, createdAt: r.created_at, type: r.type as AlertItem["type"], ticker: r.ticker ?? undefined,
   title: r.title, body: r.body, read: r.read, dedupe: r.dedupe,
 });
+
+/** chave do estado de cada carteira de pregão na tabela kv */
+const stateKey = (pid: string) => (pid === PREGAO_DEFAULT ? "pregao" : `pregao:${pid}`);
 
 export class SupabaseStore implements Store {
   private db: SupabaseClient;
@@ -104,11 +107,13 @@ export class SupabaseStore implements Store {
     return (data ?? []).map((r) => ({ at: r.at, job: r.job, ok: r.ok, message: r.message })) as JobLogEntry[];
   }
 
-  // pregão simulado
-  getPregao() { return this.kvGet<PregaoState | null>("pregao", null); }
-  savePregao(s: PregaoState | null) { return this.kvSet("pregao", s); }
-  async listOrders() {
-    const { data, error } = await this.db.from("pregao_orders").select("*").order("created_at");
+  // carteiras de pregão (padrão e simuladas)
+  listCarteiras() { return this.kvGet<Carteira[]>("carteiras", []); }
+  saveCarteiras(list: Carteira[]) { return this.kvSet("carteiras", list); }
+  getPregao(pid = PREGAO_DEFAULT) { return this.kvGet<PregaoState | null>(stateKey(pid), null); }
+  savePregao(s: PregaoState | null, pid = PREGAO_DEFAULT) { return this.kvSet(stateKey(pid), s); }
+  async listOrders(pid = PREGAO_DEFAULT) {
+    const { data, error } = await this.db.from("pregao_orders").select("*").eq("portfolio_id", pid).order("created_at");
     if (error) throw new Error(`pregao.orders: ${error.message}`);
     return (data ?? []).map((r) => toOrder(r as OrderRow));
   }
@@ -117,8 +122,8 @@ export class SupabaseStore implements Store {
     const { error } = await this.db.from("pregao_orders").upsert(list.map(toOrderRow), { onConflict: "id" });
     if (error) throw new Error(`pregao.orders.upsert: ${error.message}`);
   }
-  async listFills() {
-    const { data, error } = await this.db.from("pregao_fills").select("*").order("date");
+  async listFills(pid = PREGAO_DEFAULT) {
+    const { data, error } = await this.db.from("pregao_fills").select("*").eq("portfolio_id", pid).order("date");
     if (error) throw new Error(`pregao.fills: ${error.message}`);
     return (data ?? []).map((r) => toFill(r as FillRow));
   }
@@ -127,23 +132,23 @@ export class SupabaseStore implements Store {
     const { error } = await this.db.from("pregao_fills").upsert(list.map(toFillRow), { onConflict: "id" });
     if (error) throw new Error(`pregao.fills.add: ${error.message}`);
   }
-  async clearPregao() {
-    // fills saem em cascata com as ordens (FK on delete cascade)
-    const { error } = await this.db.from("pregao_orders").delete().neq("id", "00000000-0000-0000-0000-000000000000");
+  async clearPregao(pid = PREGAO_DEFAULT) {
+    // as execuções saem em cascata com as ordens (FK on delete cascade)
+    const { error } = await this.db.from("pregao_orders").delete().eq("portfolio_id", pid);
     if (error) throw new Error(`pregao.clear: ${error.message}`);
-    await this.kvSet("pregao", null);
+    await this.kvSet(stateKey(pid), null);
   }
 }
 
 type OrderRow = {
-  id: string; created_at: string; created_date: string; ticker: string; side: string; type: string; qty: number;
+  id: string; portfolio_id: string; created_at: string; created_date: string; ticker: string; side: string; type: string; qty: number;
   limit_price: number | null; stop_price: number | null; est_price: number | null; status: string; filled_qty: number; avg_price: number;
   fees: number; session_date: string | null; reason: string | null; gap: number | null;
 };
-type FillRow = { id: string; order_id: string; date: string; ticker: string; side: string; qty: number; price: number; fees: number };
+type FillRow = { id: string; portfolio_id: string; order_id: string; date: string; ticker: string; side: string; qty: number; price: number; fees: number };
 
 const toOrder = (r: OrderRow): PregaoOrder => ({
-  id: r.id, createdAt: r.created_at, createdDate: r.created_date, ticker: r.ticker,
+  id: r.id, portfolioId: r.portfolio_id, createdAt: r.created_at, createdDate: r.created_date, ticker: r.ticker,
   side: r.side as PregaoOrder["side"], type: r.type as PregaoOrder["type"], qty: Number(r.qty),
   limitPrice: r.limit_price != null ? Number(r.limit_price) : undefined,
   stopPrice: r.stop_price != null ? Number(r.stop_price) : undefined,
@@ -152,13 +157,16 @@ const toOrder = (r: OrderRow): PregaoOrder => ({
   sessionDate: r.session_date ?? undefined, reason: r.reason ?? undefined, gap: r.gap != null ? Number(r.gap) : undefined,
 });
 const toOrderRow = (o: PregaoOrder) => ({
-  id: o.id, created_at: o.createdAt, created_date: o.createdDate, ticker: o.ticker, side: o.side, type: o.type, qty: o.qty,
+  id: o.id, portfolio_id: o.portfolioId ?? PREGAO_DEFAULT, created_at: o.createdAt, created_date: o.createdDate, ticker: o.ticker,
+  side: o.side, type: o.type, qty: o.qty,
   limit_price: o.limitPrice ?? null, stop_price: o.stopPrice ?? null, est_price: o.estPrice ?? null, status: o.status, filled_qty: o.filledQty,
   avg_price: o.avgPrice, fees: o.fees, session_date: o.sessionDate ?? null, reason: o.reason ?? null, gap: o.gap ?? null,
 });
 const toFill = (r: FillRow): PregaoFill => ({
-  id: r.id, orderId: r.order_id, date: r.date, ticker: r.ticker, side: r.side as PregaoFill["side"], qty: Number(r.qty), price: Number(r.price), fees: Number(r.fees),
+  id: r.id, portfolioId: r.portfolio_id, orderId: r.order_id, date: r.date, ticker: r.ticker, side: r.side as PregaoFill["side"],
+  qty: Number(r.qty), price: Number(r.price), fees: Number(r.fees),
 });
 const toFillRow = (f: PregaoFill) => ({
-  id: f.id, order_id: f.orderId, date: f.date, ticker: f.ticker, side: f.side, qty: f.qty, price: f.price, fees: f.fees,
+  id: f.id, portfolio_id: f.portfolioId ?? PREGAO_DEFAULT, order_id: f.orderId, date: f.date, ticker: f.ticker, side: f.side,
+  qty: f.qty, price: f.price, fees: f.fees,
 });

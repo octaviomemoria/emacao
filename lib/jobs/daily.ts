@@ -22,11 +22,11 @@ export interface DailyResult {
 }
 
 /** alertas das ordens do pregão simulado processadas nesta rodada */
-function pregaoAlerts(outcomes: OrderOutcome[], gapPct: number): NewAlert[] {
+function pregaoAlerts(outcomes: OrderOutcome[], gapPct: number, prefix = ""): NewAlert[] {
   const out: NewAlert[] = [];
   for (const { order: o } of outcomes) {
     const tipo = o.type === "MARKET" ? "a mercado" : o.type === "LIMIT" ? `limite ${brl(o.limitPrice ?? 0)}` : `stop ${brl(o.stopPrice ?? 0)}`;
-    const head = `${o.side === "BUY" ? "Compra" : "Venda"} ${o.ticker} (${tipo}, ${o.qty} ações)`;
+    const head = `${prefix}${o.side === "BUY" ? "Compra" : "Venda"} ${o.ticker} (${tipo}, ${o.qty} ações)`;
     const sess = o.sessionDate ?? "";
     if (o.status === "EXECUTED" || o.status === "PARTIAL") {
       out.push({
@@ -40,7 +40,7 @@ function pregaoAlerts(outcomes: OrderOutcome[], gapPct: number): NewAlert[] {
       out.push({ type: "PREGAO_NAO_EXECUTADA", ticker: o.ticker, dedupe: `PREG:${o.id}:NOT`, title: `${head}: não executada`, body: `pregão ${sess} · ${o.reason ?? ""} · validade do dia encerrada` });
     }
     if (o.type === "MARKET" && o.gap !== undefined && Math.abs(o.gap) >= gapPct) {
-      out.push({ type: "PREGAO_GAP", ticker: o.ticker, dedupe: `PGAP:${o.id}`, title: `${o.ticker}: abertura com gap de ${pct(o.gap)}`, body: `pregão ${sess} · a execução a mercado pode ter ficado distante do fechamento anterior` });
+      out.push({ type: "PREGAO_GAP", ticker: o.ticker, dedupe: `PGAP:${o.id}`, title: `${prefix}${o.ticker}: abertura com gap de ${pct(o.gap)}`, body: `pregão ${sess} · a execução a mercado pode ter ficado distante do fechamento anterior` });
     }
   }
   return out;
@@ -134,6 +134,14 @@ export async function runDaily(store: Store, opts: { now?: Date; notify?: boolea
     closedWithoutFill: pregaoRun.outcomes.filter((o) => o.order.status === "NOT_EXECUTED" || o.order.status === "BLOCKED").length,
   };
 
+  // 4c) carteiras simuladas: a mesma regra de execução, com capital e parâmetros de cada carteira
+  const carteiras = await store.listCarteiras();
+  const carteiraRuns: { name: string; params: typeof settings.pregao; outcomes: OrderOutcome[] }[] = [];
+  for (const c of carteiras) {
+    const r = await runPregaoJob(store, { pid: c.id, data, splits, refDate, pregao: c.params, params: p, cdiMap, now });
+    carteiraRuns.push({ name: c.name, params: c.params, outcomes: r.outcomes });
+  }
+
   // 5) alertas
   const prefs = settings.alertPrefs;
   const items: NewAlert[] = [];
@@ -184,10 +192,13 @@ export async function runDaily(store: Store, opts: { now?: Date; notify?: boolea
     for (const k of skipped) items.push({ type: "DATA_ISSUE", ticker: k.ticker, dedupe: `DATA:${k.ticker}:${k.reason.slice(0, 20)}:${refDate.slice(0, 7)}`, title: `Dados de ${k.ticker}: ${k.reason}`, body: "ativo ignorado ou com dados antigos nesta rodada" });
   }
   items.push(...pregaoAlerts(pregaoRun.outcomes, settings.pregao.gapPct));
+  for (const cr of carteiraRuns) items.push(...pregaoAlerts(cr.outcomes, cr.params.gapPct, `[${cr.name}] `));
   const fresh = await store.addAlerts(items);
   const sent = opts.notify === false ? [] : await notifyAll(store, fresh);
+  const carteiraExec = carteiraRuns.reduce((a, cr) => a + cr.outcomes.filter((o) => o.order.status === "EXECUTED" || o.order.status === "PARTIAL").length, 0);
   const pregaoTxt = pregaoSummary.sessions ? ` · pregão simulado: ${pregaoSummary.sessions} sessão(ões), ${pregaoSummary.executed} execução(ões)` : "";
-  await store.appendJobLog({ at: new Date().toISOString(), job: "daily", ok: true, message: `ref ${refDate} · ${valid.length} ativos · ${fresh.length} alertas novos · patrimônio simulado ${brl(equity)}${pregaoTxt}` });
+  const carteiraTxt = carteiras.length ? ` · carteiras simuladas: ${carteiras.length}, ${carteiraExec} execução(ões)` : "";
+  await store.appendJobLog({ at: new Date().toISOString(), job: "daily", ok: true, message: `ref ${refDate} · ${valid.length} ativos · ${fresh.length} alertas novos · patrimônio simulado ${brl(equity)}${pregaoTxt}${carteiraTxt}` });
   return { refDate, assets: valid.length, skipped, newAlerts: fresh.length, notify: sent, simEquity: equity, pregao: pregaoSummary };
 }
 

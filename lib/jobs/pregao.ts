@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import {
-  applySplit, newPregaoState, processPregaoDay,
+  applySplit, newPregaoState, PREGAO_DEFAULT, processPregaoDay,
   type DayInput, type OrderOutcome, type PregaoFill, type PregaoSettings, type PregaoState,
 } from "@/lib/engine/pregao";
 import type { Candle, Params } from "@/lib/engine/types";
@@ -14,23 +14,24 @@ export interface PregaoRunResult {
   splitsApplied: { ticker: string; date: string; ratio: number }[];
 }
 
-/** Garante o estado do pregão simulado (cria com o capital configurado, se não existir). */
-export async function ensurePregaoState(store: Store, capital: number, date: string): Promise<PregaoState> {
-  const st = await store.getPregao();
+/** Garante o estado da carteira (cria com o capital informado, se não existir). */
+export async function ensurePregaoState(store: Store, capital: number, date: string, pid = PREGAO_DEFAULT): Promise<PregaoState> {
+  const st = await store.getPregao(pid);
   if (st) return st;
   const created = newPregaoState(date, capital);
-  await store.savePregao(created);
+  await store.savePregao(created, pid);
   return created;
 }
 
 /**
- * Executa as ordens do pregão simulado para cada pregão novo presente nos dados desta rodada.
+ * Executa as ordens de uma carteira de pregão para cada pregão novo presente nos dados desta rodada.
  * Ordens de tickers sem dados nesta rodada continuam abertas. Ordens de tickers com dados mas sem
- * candle naquele pregão são encerradas como "sem negociação".
+ * candle naquele pregão encerram como "sem negociação".
  */
 export async function runPregaoJob(
   store: Store,
   args: {
+    pid?: string;
     data: Map<string, Candle[]>;
     splits: Map<string, SplitEvent[]>;
     refDate: string;
@@ -40,8 +41,9 @@ export async function runPregaoJob(
     now: Date;
   },
 ): Promise<PregaoRunResult> {
-  const existed = (await store.getPregao()) !== null;
-  const st = await ensurePregaoState(store, args.pregao.capital, args.refDate);
+  const pid = args.pid ?? PREGAO_DEFAULT;
+  const existed = (await store.getPregao(pid)) !== null;
+  const st = await ensurePregaoState(store, args.pregao.capital, args.refDate, pid);
   const result: PregaoRunResult = { initialized: !existed, sessions: [], outcomes: [], splitsApplied: [] };
 
   const dateSet = new Set<string>();
@@ -54,7 +56,7 @@ export async function runPregaoJob(
   const sessions = [...dateSet].sort();
   if (!sessions.length) return result;
 
-  let orders = await store.listOrders();
+  let orders = await store.listOrders(pid);
   const fills: PregaoFill[] = [];
   const outcomes: OrderOutcome[] = [];
 
@@ -96,9 +98,9 @@ export async function runPregaoJob(
     result.sessions.push(d);
   }
 
-  await store.savePregao(st);
-  await store.upsertOrders(outcomes.map((o) => o.order));
-  await store.addFills(fills);
-  result.outcomes = outcomes;
+  await store.savePregao(st, pid);
+  await store.upsertOrders(outcomes.map((o) => ({ ...o.order, portfolioId: pid })));
+  await store.addFills(fills.map((f) => ({ ...f, portfolioId: pid })));
+  result.outcomes = outcomes.map((o) => ({ ...o, order: { ...o.order, portfolioId: pid } }));
   return result;
 }

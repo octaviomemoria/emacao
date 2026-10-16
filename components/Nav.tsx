@@ -7,6 +7,7 @@ const LINKS = [
   { href: "/radar", label: "Radar", icon: "◎" },
   { href: "/simulacao", label: "Simulação", icon: "▤" },
   { href: "/pregao", label: "Pregão", icon: "⇅" },
+  { href: "/carteiras", label: "Simuladas", icon: "◫" },
   { href: "/carteira", label: "Carteira", icon: "▣" },
   { href: "/alertas", label: "Alertas", icon: "✉" },
   { href: "/backtest", label: "Backtest", icon: "↺" },
@@ -28,7 +29,7 @@ export default function Nav({ unread }: { unread: number }) {
         ))}
       </nav>
       {/* celular: barra inferior */}
-      <nav className="fixed inset-x-0 bottom-0 z-20 grid grid-cols-8 border-t border-zinc-500/30 bg-[var(--background)] md:hidden">
+      <nav className="fixed inset-x-0 bottom-0 z-20 grid grid-cols-9 border-t border-zinc-500/30 bg-[var(--background)] md:hidden">
         {LINKS.map((l) => (
           <Link key={l.href} href={l.href} className={`relative flex flex-col items-center py-2 text-[10px] ${active(l.href) ? "font-semibold" : "opacity-60"}`}>
             <span className="text-base leading-none">{l.icon}</span>

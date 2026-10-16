@@ -1,9 +1,9 @@
 "use client";
 import { useActionState, useState } from "react";
-import { placePregaoOrder, resetPregao, savePregaoSettings } from "@/app/actions";
 import type { PregaoSettings } from "@/lib/engine/pregao";
 
 type R = { ok?: boolean; error?: string } | null;
+type Act = (prev: R, fd: FormData) => Promise<R>;
 const Msg = ({ r }: { r: R }) => (r?.error ? <span className="text-sm text-red-500">{r.error}</span> : r?.ok ? <span className="text-sm text-emerald-500">Feito.</span> : null);
 const L = ({ label, children }: { label: string; children: React.ReactNode }) => (
   <label className="flex flex-col gap-1 text-xs"><span className="opacity-60">{label}</span>{children}</label>
@@ -11,8 +11,10 @@ const L = ({ label, children }: { label: string; children: React.ReactNode }) =>
 const brl = (v: number) => v.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
 
 /** formulário de ordem do pregão simulado, com estimativa pelo último fechamento */
-export function PregaoTicket({ tickers, refPrices, pg, cashAvail }: { tickers: string[]; refPrices: Record<string, number>; pg: PregaoSettings; cashAvail: number }) {
-  const [r, act, pending] = useActionState(placePregaoOrder, null as R);
+export function PregaoTicket({ tickers, refPrices, pg, cashAvail, action, pid }: {
+  tickers: string[]; refPrices: Record<string, number>; pg: PregaoSettings; cashAvail: number; action: Act; pid: string;
+}) {
+  const [r, act, pending] = useActionState(action, null as R);
   const [ticker, setTicker] = useState(tickers[0] ?? "");
   const [side, setSide] = useState<"BUY" | "SELL">("BUY");
   const [type, setType] = useState<"MARKET" | "LIMIT" | "STOP">("MARKET");
@@ -30,6 +32,7 @@ export function PregaoTicket({ tickers, refPrices, pg, cashAvail }: { tickers: s
 
   return (
     <form action={act} className="flex flex-col gap-3">
+      <input type="hidden" name="pid" value={pid} />
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
         <L label="Ativo">
           <select name="ticker" value={ticker} onChange={(e) => setTicker(e.target.value)}>
@@ -80,11 +83,12 @@ export function PregaoTicket({ tickers, refPrices, pg, cashAvail }: { tickers: s
   );
 }
 
-export function PregaoSettingsForm({ pg }: { pg: PregaoSettings }) {
-  const [r, act, pending] = useActionState(savePregaoSettings, null as R);
+/** parâmetros de custo e execução da carteira (o capital muda só ao zerar) */
+export function PregaoSettingsForm({ pg, action, pid }: { pg: PregaoSettings; action: Act; pid: string }) {
+  const [r, act, pending] = useActionState(action, null as R);
   return (
     <form action={act} className="grid grid-cols-2 items-end gap-3 sm:grid-cols-3">
-      <L label="Capital do pregão (R$)"><input name="capital" inputMode="decimal" defaultValue={pg.capital} /></L>
+      <input type="hidden" name="pid" value={pid} />
       <L label="Deslizamento (%)"><input name="slippagePct" inputMode="decimal" defaultValue={+(pg.slippage * 100).toFixed(4)} /></L>
       <L label="Máx. do volume do dia (%)"><input name="participationPct" inputMode="decimal" defaultValue={+(pg.participation * 100).toFixed(4)} /></L>
       <L label="Emolumentos (%)"><input name="feePct" inputMode="decimal" defaultValue={+(pg.feePct * 100).toFixed(5)} /></L>
@@ -98,12 +102,14 @@ export function PregaoSettingsForm({ pg }: { pg: PregaoSettings }) {
   );
 }
 
-export function PregaoResetForm({ capital }: { capital: number }) {
-  const [r, act, pending] = useActionState(resetPregao, null as R);
+/** zera a carteira e recomeça com o capital informado */
+export function PregaoResetForm({ capital, action, pid }: { capital: number; action: Act; pid: string }) {
+  const [r, act, pending] = useActionState(action, null as R);
   return (
-    <form action={act} className="flex flex-wrap items-end gap-2" onSubmit={(e) => { if (!confirm("Zerar o pregão simulado? Ordens, execuções e posições serão apagadas.")) e.preventDefault(); }}>
+    <form action={act} className="flex flex-wrap items-end gap-2" onSubmit={(e) => { if (!confirm("Zerar esta carteira? Ordens, execuções e posições serão apagadas.")) e.preventDefault(); }}>
+      <input type="hidden" name="pid" value={pid} />
       <L label="Capital inicial (R$)"><input name="capital" inputMode="decimal" defaultValue={capital} /></L>
-      <button className="btn ghost" disabled={pending}>{pending ? "Zerando…" : "Zerar pregão"}</button>
+      <button className="btn ghost" disabled={pending}>{pending ? "Zerando…" : "Zerar carteira"}</button>
       <Msg r={r} />
     </form>
   );

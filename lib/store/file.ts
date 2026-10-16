@@ -3,10 +3,10 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
 import type { Candle, SimState } from "@/lib/engine/types";
-import type { PregaoFill, PregaoOrder, PregaoState } from "@/lib/engine/pregao";
+import { PREGAO_DEFAULT, type PregaoFill, type PregaoOrder, type PregaoState } from "@/lib/engine/pregao";
 import {
   DEFAULT_ASSETS, DEFAULT_SETTINGS,
-  type AlertItem, type Asset, type Channels, type JobLogEntry, type PushSub, type Settings, type Snapshot, type Store, type Tx,
+  type AlertItem, type Asset, type Carteira, type Channels, type JobLogEntry, type PushSub, type Settings, type Snapshot, type Store, type Tx,
 } from "./types";
 
 const dir = () => path.resolve(/* turbopackIgnore: true */ process.env.DATA_DIR ?? ".data");
@@ -70,23 +70,32 @@ export class FileStore implements Store {
   async appendJobLog(e: JobLogEntry) { const a = await read<JobLogEntry[]>("joblog.json", []); a.push(e); await write("joblog.json", a.slice(-200)); }
   async listJobLog(limit: number) { return (await read<JobLogEntry[]>("joblog.json", [])).slice(-limit).reverse(); }
 
-  // pregão simulado
-  getPregao() { return read<PregaoState | null>("pregao.json", null); }
-  savePregao(s: PregaoState | null) { return write("pregao.json", s); }
-  listOrders() { return read<PregaoOrder[]>("pregao_orders.json", []); }
+  // carteiras de pregão (padrão e simuladas)
+  listCarteiras() { return read<Carteira[]>("carteiras.json", []); }
+  saveCarteiras(list: Carteira[]) { return write("carteiras.json", list); }
+  getPregao(pid = PREGAO_DEFAULT) { return read<PregaoState | null>(stateFile(pid), null); }
+  savePregao(s: PregaoState | null, pid = PREGAO_DEFAULT) { return write(stateFile(pid), s); }
+  async listOrders(pid = PREGAO_DEFAULT) {
+    return (await read<PregaoOrder[]>("pregao_orders.json", [])).filter((o) => (o.portfolioId ?? PREGAO_DEFAULT) === pid);
+  }
   async upsertOrders(list: PregaoOrder[]) {
     const byId = new Map((await read<PregaoOrder[]>("pregao_orders.json", [])).map((o) => [o.id, o]));
     for (const o of list) byId.set(o.id, o);
     await write("pregao_orders.json", [...byId.values()]);
   }
-  listFills() { return read<PregaoFill[]>("pregao_fills.json", []); }
+  async listFills(pid = PREGAO_DEFAULT) {
+    return (await read<PregaoFill[]>("pregao_fills.json", [])).filter((f) => (f.portfolioId ?? PREGAO_DEFAULT) === pid);
+  }
   async addFills(list: PregaoFill[]) {
     if (!list.length) return;
     await write("pregao_fills.json", [...(await read<PregaoFill[]>("pregao_fills.json", [])), ...list]);
   }
-  async clearPregao() {
-    await write("pregao.json", null);
-    await write("pregao_orders.json", []);
-    await write("pregao_fills.json", []);
+  async clearPregao(pid = PREGAO_DEFAULT) {
+    const keep = (x: { portfolioId?: string }) => (x.portfolioId ?? PREGAO_DEFAULT) !== pid;
+    await write(stateFile(pid), null);
+    await write("pregao_orders.json", (await read<PregaoOrder[]>("pregao_orders.json", [])).filter(keep));
+    await write("pregao_fills.json", (await read<PregaoFill[]>("pregao_fills.json", [])).filter(keep));
   }
 }
+
+const stateFile = (pid: string) => (pid === PREGAO_DEFAULT ? "pregao.json" : `pregao_state_${pid}.json`);

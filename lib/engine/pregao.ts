@@ -12,8 +12,12 @@ export type OrderSide = "BUY" | "SELL";
 export type OrderType = "MARKET" | "LIMIT" | "STOP";
 export type OrderStatus = "OPEN" | "EXECUTED" | "PARTIAL" | "NOT_EXECUTED" | "BLOCKED" | "CANCELLED";
 
+/** identificador da carteira de pregão padrão (a do menu "Pregão"); as demais são as Carteiras Simuladas */
+export const PREGAO_DEFAULT = "pregao";
+
 export interface PregaoOrder {
   id: string;
+  portfolioId?: string; // PREGAO_DEFAULT quando ausente (registros anteriores às carteiras simuladas)
   createdAt: string; // ISO
   createdDate: string; // data (BRT) da digitação; a sessão é o primeiro pregão posterior
   ticker: string;
@@ -34,6 +38,7 @@ export interface PregaoOrder {
 
 export interface PregaoFill {
   id: string;
+  portfolioId?: string;
   orderId: string;
   date: string;
   ticker: string;
