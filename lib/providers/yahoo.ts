@@ -2,6 +2,10 @@ import type { Candle } from "@/lib/engine/types";
 
 const BRT_OFFSET_MIN = -180;
 
+export interface SplitEvent { date: string; ratio: number } // ratio > 1 desdobramento, < 1 grupamento
+
+export interface YahooResult { candles: Candle[]; splits: SplitEvent[] }
+
 /** data/hora atual em Brasília */
 export function nowBRT(now = new Date()): { date: string; minutes: number } {
   const t = new Date(now.getTime() + BRT_OFFSET_MIN * 60000);
@@ -16,10 +20,11 @@ export function dropPartialToday(candles: Candle[], now = new Date()): Candle[] 
 }
 
 /**
- * Candles diários ajustados (proventos e desdobramentos) de um ticker da B3 via endpoint "chart" do Yahoo Finance.
- * Fonte não oficial: pode mudar ou limitar acessos — por isso o provedor fica isolado aqui.
+ * Candles diários de um ticker da B3 via endpoint "chart" do Yahoo Finance.
+ * Guarda OHLC ajustado (proventos e desdobramentos, para os sinais) e o OHLC bruto (para executar ordens do pregão simulado),
+ * além dos eventos de desdobramento/grupamento. Fonte não oficial: por isso o provedor fica isolado aqui.
  */
-export async function fetchYahoo(ticker: string, fromDate: string, now = new Date()): Promise<Candle[]> {
+export async function fetchYahoo(ticker: string, fromDate: string, now = new Date()): Promise<YahooResult> {
   const p1 = Math.floor(Date.parse(fromDate + "T00:00:00Z") / 1000);
   const p2 = Math.floor(now.getTime() / 1000) + 86400;
   const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(ticker)}.SA?period1=${p1}&period2=${p2}&interval=1d&events=div%7Csplit&includeAdjustedClose=true`;
@@ -29,6 +34,7 @@ export async function fetchYahoo(ticker: string, fromDate: string, now = new Dat
   const r = json?.chart?.result?.[0];
   if (!r?.timestamp) throw new Error(`Yahoo ${ticker}: sem dados (${json?.chart?.error?.description ?? "resposta vazia"})`);
   const off: number = r.meta?.gmtoffset ?? BRT_OFFSET_MIN * 60;
+  const toDate = (ts: number) => new Date((ts + off) * 1000).toISOString().slice(0, 10);
   const q = r.indicators.quote[0];
   const adj: (number | null)[] | undefined = r.indicators.adjclose?.[0]?.adjclose;
   const out: Candle[] = [];
@@ -37,11 +43,19 @@ export async function fetchYahoo(ticker: string, fromDate: string, now = new Dat
     if (o == null || h == null || l == null || c == null || !(c > 0)) continue;
     const f = adj && adj[i] != null ? (adj[i] as number) / c : 1;
     out.push({
-      date: new Date((r.timestamp[i] + off) * 1000).toISOString().slice(0, 10),
+      date: toDate(r.timestamp[i]),
       open: o * f, high: h * f, low: l * f, close: c * f, volume: v ?? 0,
+      raw: { open: o, high: h, low: l, close: c },
     });
   }
   // remove duplicatas de data mantendo a última
   const byDate = new Map(out.map((c) => [c.date, c]));
-  return dropPartialToday([...byDate.values()].sort((a, b) => a.date.localeCompare(b.date)), now);
+  const candles = dropPartialToday([...byDate.values()].sort((a, b) => a.date.localeCompare(b.date)), now);
+
+  const splitsRaw: Record<string, { date: number; numerator: number; denominator: number }> = r.events?.splits ?? {};
+  const splits: SplitEvent[] = Object.values(splitsRaw)
+    .filter((s) => s.numerator > 0 && s.denominator > 0)
+    .map((s) => ({ date: toDate(s.date), ratio: s.numerator / s.denominator }))
+    .sort((a, b) => a.date.localeCompare(b.date));
+  return { candles, splits };
 }

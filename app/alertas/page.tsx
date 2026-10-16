@@ -9,6 +9,9 @@ const LABEL: Record<AlertType, { t: string; tone: "green" | "red" | "amber" | "b
   BUY: { t: "Comprar", tone: "green" }, SELL: { t: "Vender", tone: "red" }, REAL_SELL: { t: "Vender (real)", tone: "red" },
   SIM_CLOSED: { t: "Simulação encerrada", tone: "gray" }, NEAR_TRIGGER: { t: "Perto do gatilho", tone: "blue" },
   DATA_ISSUE: { t: "Dados", tone: "amber" }, DIVERGENCE: { t: "Divergência", tone: "amber" }, INFO: { t: "Aviso", tone: "gray" },
+  PREGAO_EXECUTADA: { t: "Pregão: executada", tone: "green" }, PREGAO_PARCIAL: { t: "Pregão: parcial", tone: "blue" },
+  PREGAO_NAO_EXECUTADA: { t: "Pregão: não executada", tone: "gray" }, PREGAO_BLOQUEADA: { t: "Pregão: bloqueada", tone: "red" },
+  PREGAO_GAP: { t: "Pregão: gap", tone: "amber" },
 };
 
 export default async function Alertas() {

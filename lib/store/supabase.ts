@@ -4,6 +4,7 @@ import {
   DEFAULT_ASSETS, DEFAULT_SETTINGS,
   type AlertItem, type Asset, type Channels, type JobLogEntry, type PushSub, type Settings, type Snapshot, type Store, type Tx,
 } from "./types";
+import type { PregaoFill, PregaoOrder, PregaoState } from "@/lib/engine/pregao";
 
 type AlertRow = { id: string; created_at: string; type: string; ticker: string | null; title: string; body: string; read: boolean; dedupe: string };
 const toAlert = (r: AlertRow): AlertItem => ({
@@ -29,7 +30,7 @@ export class SupabaseStore implements Store {
   }
   async getSettings(): Promise<Settings> {
     const s = await this.kvGet<Partial<Settings>>("settings", {});
-    return { ...DEFAULT_SETTINGS, ...s, params: { ...DEFAULT_SETTINGS.params, ...(s.params ?? {}) } } as Settings;
+    return { ...DEFAULT_SETTINGS, ...s, params: { ...DEFAULT_SETTINGS.params, ...(s.params ?? {}) }, pregao: { ...DEFAULT_SETTINGS.pregao, ...(s.pregao ?? {}) } } as Settings;
   }
   saveSettings(s: Settings) { return this.kvSet("settings", s); }
   getAssets() { return this.kvGet<Asset[]>("assets", DEFAULT_ASSETS); }
@@ -102,4 +103,62 @@ export class SupabaseStore implements Store {
     const { data } = await this.db.from("job_log").select("*").order("at", { ascending: false }).limit(limit);
     return (data ?? []).map((r) => ({ at: r.at, job: r.job, ok: r.ok, message: r.message })) as JobLogEntry[];
   }
+
+  // pregão simulado
+  getPregao() { return this.kvGet<PregaoState | null>("pregao", null); }
+  savePregao(s: PregaoState | null) { return this.kvSet("pregao", s); }
+  async listOrders() {
+    const { data, error } = await this.db.from("pregao_orders").select("*").order("created_at");
+    if (error) throw new Error(`pregao.orders: ${error.message}`);
+    return (data ?? []).map((r) => toOrder(r as OrderRow));
+  }
+  async upsertOrders(list: PregaoOrder[]) {
+    if (!list.length) return;
+    const { error } = await this.db.from("pregao_orders").upsert(list.map(toOrderRow), { onConflict: "id" });
+    if (error) throw new Error(`pregao.orders.upsert: ${error.message}`);
+  }
+  async listFills() {
+    const { data, error } = await this.db.from("pregao_fills").select("*").order("date");
+    if (error) throw new Error(`pregao.fills: ${error.message}`);
+    return (data ?? []).map((r) => toFill(r as FillRow));
+  }
+  async addFills(list: PregaoFill[]) {
+    if (!list.length) return;
+    const { error } = await this.db.from("pregao_fills").upsert(list.map(toFillRow), { onConflict: "id" });
+    if (error) throw new Error(`pregao.fills.add: ${error.message}`);
+  }
+  async clearPregao() {
+    // fills saem em cascata com as ordens (FK on delete cascade)
+    const { error } = await this.db.from("pregao_orders").delete().neq("id", "00000000-0000-0000-0000-000000000000");
+    if (error) throw new Error(`pregao.clear: ${error.message}`);
+    await this.kvSet("pregao", null);
+  }
 }
+
+type OrderRow = {
+  id: string; created_at: string; created_date: string; ticker: string; side: string; type: string; qty: number;
+  limit_price: number | null; stop_price: number | null; est_price: number | null; status: string; filled_qty: number; avg_price: number;
+  fees: number; session_date: string | null; reason: string | null; gap: number | null;
+};
+type FillRow = { id: string; order_id: string; date: string; ticker: string; side: string; qty: number; price: number; fees: number };
+
+const toOrder = (r: OrderRow): PregaoOrder => ({
+  id: r.id, createdAt: r.created_at, createdDate: r.created_date, ticker: r.ticker,
+  side: r.side as PregaoOrder["side"], type: r.type as PregaoOrder["type"], qty: Number(r.qty),
+  limitPrice: r.limit_price != null ? Number(r.limit_price) : undefined,
+  stopPrice: r.stop_price != null ? Number(r.stop_price) : undefined,
+  estPrice: r.est_price != null ? Number(r.est_price) : undefined,
+  status: r.status as PregaoOrder["status"], filledQty: Number(r.filled_qty), avgPrice: Number(r.avg_price), fees: Number(r.fees),
+  sessionDate: r.session_date ?? undefined, reason: r.reason ?? undefined, gap: r.gap != null ? Number(r.gap) : undefined,
+});
+const toOrderRow = (o: PregaoOrder) => ({
+  id: o.id, created_at: o.createdAt, created_date: o.createdDate, ticker: o.ticker, side: o.side, type: o.type, qty: o.qty,
+  limit_price: o.limitPrice ?? null, stop_price: o.stopPrice ?? null, est_price: o.estPrice ?? null, status: o.status, filled_qty: o.filledQty,
+  avg_price: o.avgPrice, fees: o.fees, session_date: o.sessionDate ?? null, reason: o.reason ?? null, gap: o.gap ?? null,
+});
+const toFill = (r: FillRow): PregaoFill => ({
+  id: r.id, orderId: r.order_id, date: r.date, ticker: r.ticker, side: r.side as PregaoFill["side"], qty: Number(r.qty), price: Number(r.price), fees: Number(r.fees),
+});
+const toFillRow = (f: PregaoFill) => ({
+  id: f.id, order_id: f.orderId, date: f.date, ticker: f.ticker, side: f.side, qty: f.qty, price: f.price, fees: f.fees,
+});

@@ -9,7 +9,11 @@ export const dynamic = "force-dynamic";
 
 export default async function Carteira() {
   const store = (await getStore());
-  const [txs, snap, sim, settings] = await Promise.all([store.listTx(), store.getSnapshot(), store.getSim(), store.getSettings()]);
+  const [txs, snap, sim, settings, pregaoFills] = await Promise.all([store.listTx(), store.getSnapshot(), store.getSim(), store.getSettings(), store.listFills()]);
+  const pregaoTaxes = taxMonths(
+    pregaoFills.map((f) => ({ id: f.id, date: f.date, ticker: f.ticker, side: f.side, qty: f.qty, price: f.price, fees: f.fees })),
+    { etfs: settings.etfs, useExemption: settings.useExemption, rate: settings.params.taxRate },
+  );
   const sig = new Map((snap?.signals ?? []).map((s) => [s.ticker, s]));
   const pos = realPositions(txs);
   const simSet = new Set((sim?.positions ?? []).map((x) => x.ticker));
@@ -58,6 +62,16 @@ export default async function Carteira() {
                 <td className="num">{brl(t.lossUsed, 0)}</td><td className="num">{brl(t.taxableBase, 0)}</td><td className="num font-semibold">{brl(t.tax, 2)}</td><td>{t.tax > 0 ? dmy(t.dueDate) : "—"}</td>
                 <td>{t.exempt && <Badge tone="green">isento</Badge>} {t.dayTradeWarning && <Badge tone="amber">day trade (20%): apurar à parte</Badge>}</td></tr>))}</tbody></table></div>
         ) : <Empty>Sem vendas registradas.</Empty>}
+      </Card>
+
+      <Card title="Imposto de renda do pregão simulado (estimativa)">
+        <p className="mb-2 text-xs opacity-60">Mesma regra da carteira real, aplicada às execuções do pregão simulado. Não é imposto pago de verdade: serve para simular o efeito fiscal da sua estratégia.</p>
+        {pregaoTaxes.length ? (
+          <div className="table-wrap"><table className="t"><thead><tr><th>Mês</th><th className="num">Vendas ações</th><th className="num">Lucro ações</th><th className="num">Prejuízo usado</th><th className="num">IR</th><th>Vence</th></tr></thead>
+            <tbody>{[...pregaoTaxes].reverse().map((t) => (
+              <tr key={t.month}><td>{t.month}</td><td className="num">{brl(t.salesTotal, 0)}</td><td className={`num ${tone(t.gainStocks)}`}>{brl(t.gainStocks, 0)}</td>
+                <td className="num">{brl(t.lossUsed, 0)}</td><td className="num font-semibold">{brl(t.tax, 2)}</td><td>{t.tax > 0 ? dmy(t.dueDate) : "—"}</td></tr>))}</tbody></table></div>
+        ) : <Empty>Nenhuma execução de venda no pregão simulado.</Empty>}
       </Card>
 
       <Card title={`Histórico de operações (${txs.length})`}>

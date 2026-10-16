@@ -55,6 +55,19 @@ Na tela **Hoje**, clique em "Fazer a primeira atualização". Testes: `npm test`
   **Config. → Ativar notificações neste dispositivo**. No celular, instale o app pela opção "Adicionar à tela inicial".
 - Use **Config. → Enviar alerta de teste** para conferir cada canal.
 
+## Pregão simulado
+Você digita ordens (a mercado, limite ou stop, só para venda) na tela **Pregão** e o app decide a execução com a faixa de preços
+do pregão seguinte: abertura, máxima, mínima e volume **brutos** (sem ajuste por proventos).
+
+- **Quando executa:** a ordem digitada em um dia só executa no pregão seguinte, na rotina diária, depois do fechamento.
+- **Preço:** a mercado usa a abertura com deslizamento de 0,10% contra você. Limite de compra executa se a mínima tocar o limite; limite de venda, se a máxima tocar. Stop de venda dispara se a mínima tocar o stop, na abertura se ela já estiver abaixo.
+- **Quantidade:** no máximo 5% do volume do dia. O restante é cancelado (validade do dia).
+- **Bloqueios:** dado suspeito (variação acima do limite) e preços brutos ausentes impedem a execução.
+- **Taxas e IR:** emolumentos e corretagem configuráveis; o IR do pregão aparece em **Carteira**, pela mesma regra de swing trade.
+- **Limite:** não há livro de ofertas nem fila. O preenchimento é uma **estimativa**, otimista para ordens grandes em ativos pouco líquidos.
+
+Para ativar no Supabase, rode `supabase/migrations/0002_pregao.sql` no SQL Editor (depois do `0001_init.sql`).
+
 ## Limites conhecidos
 - Fonte de preços: endpoint não oficial do Yahoo Finance. Se mudar ou limitar acessos, o provedor está isolado em `lib/providers/yahoo.ts`.
 - O histórico guardado cobre cerca de 3 anos (configurável); o backtest completo 2000–2026 está na pesquisa em Python.

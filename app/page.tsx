@@ -10,7 +10,7 @@ export const dynamic = "force-dynamic";
 
 export default async function Hoje() {
   const store = (await getStore());
-  const [snap, sim, settings, alerts, txs] = await Promise.all([store.getSnapshot(), store.getSim(), store.getSettings(), store.listAlerts(8), store.listTx()]);
+  const [snap, sim, settings, alerts, txs, pregaoOrders] = await Promise.all([store.getSnapshot(), store.getSim(), store.getSettings(), store.listAlerts(8), store.listTx(), store.listOrders()]);
   if (!snap || !sim) {
     return (
       <div className="mx-auto max-w-xl py-16 text-center">
@@ -65,6 +65,31 @@ export default async function Hoje() {
           ) : <Empty>Nenhuma saída acionada.</Empty>}
         </Card>
       </div>
+
+      <Card title="Pregão simulado" right={<Link href="/pregao" className="text-xs underline">abrir o pregão →</Link>}>
+        {(() => {
+          const done = pregaoOrders.filter((o) => o.sessionDate === snap.date && o.status !== "OPEN");
+          const openN = pregaoOrders.filter((o) => o.status === "OPEN").length;
+          return (
+            <div className="flex flex-col gap-2 text-sm">
+              <p className="text-xs opacity-60">Ordens executadas no pregão de {dmy(snap.date)}: {done.length} · ordens abertas aguardando o próximo pregão: {openN}</p>
+              {done.length ? (
+                <ul className="flex flex-col gap-1">
+                  {done.map((o) => (
+                    <li key={o.id} className="flex flex-wrap items-center gap-2">
+                      <Badge tone={o.status === "EXECUTED" ? "green" : o.status === "PARTIAL" ? "blue" : o.status === "BLOCKED" ? "red" : "gray"}>
+                        {o.status === "EXECUTED" ? "executada" : o.status === "PARTIAL" ? "parcial" : o.status === "BLOCKED" ? "bloqueada" : "não executada"}
+                      </Badge>
+                      <b>{o.side === "BUY" ? "Compra" : "Venda"} {o.ticker}</b>
+                      <span className="opacity-70">{o.filledQty ? `${o.filledQty} a ${brl(o.avgPrice)}` : o.reason ?? ""}</span>
+                    </li>
+                  ))}
+                </ul>
+              ) : <Empty>Nenhuma ordem do pregão processada neste pregão.</Empty>}
+            </div>
+          );
+        })()}
+      </Card>
 
       <div className="grid gap-4 md:grid-cols-3">
         <Card title="Carteira simulada">

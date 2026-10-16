@@ -3,6 +3,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
 import type { Candle, SimState } from "@/lib/engine/types";
+import type { PregaoFill, PregaoOrder, PregaoState } from "@/lib/engine/pregao";
 import {
   DEFAULT_ASSETS, DEFAULT_SETTINGS,
   type AlertItem, type Asset, type Channels, type JobLogEntry, type PushSub, type Settings, type Snapshot, type Store, type Tx,
@@ -22,7 +23,7 @@ async function write(file: string, data: unknown) {
 export class FileStore implements Store {
   async getSettings(): Promise<Settings> {
     const s = await read<Partial<Settings>>("settings.json", {});
-    return { ...DEFAULT_SETTINGS, ...s, params: { ...DEFAULT_SETTINGS.params, ...(s.params ?? {}) } } as Settings;
+    return { ...DEFAULT_SETTINGS, ...s, params: { ...DEFAULT_SETTINGS.params, ...(s.params ?? {}) }, pregao: { ...DEFAULT_SETTINGS.pregao, ...(s.pregao ?? {}) } } as Settings;
   }
   saveSettings(s: Settings) { return write("settings.json", s); }
   getAssets() { return read<Asset[]>("assets.json", DEFAULT_ASSETS); }
@@ -68,4 +69,24 @@ export class FileStore implements Store {
   async removePushSub(e: string) { const a = await read<PushSub[]>("push.json", []); await write("push.json", a.filter((x) => x.endpoint !== e)); }
   async appendJobLog(e: JobLogEntry) { const a = await read<JobLogEntry[]>("joblog.json", []); a.push(e); await write("joblog.json", a.slice(-200)); }
   async listJobLog(limit: number) { return (await read<JobLogEntry[]>("joblog.json", [])).slice(-limit).reverse(); }
+
+  // pregão simulado
+  getPregao() { return read<PregaoState | null>("pregao.json", null); }
+  savePregao(s: PregaoState | null) { return write("pregao.json", s); }
+  listOrders() { return read<PregaoOrder[]>("pregao_orders.json", []); }
+  async upsertOrders(list: PregaoOrder[]) {
+    const byId = new Map((await read<PregaoOrder[]>("pregao_orders.json", [])).map((o) => [o.id, o]));
+    for (const o of list) byId.set(o.id, o);
+    await write("pregao_orders.json", [...byId.values()]);
+  }
+  listFills() { return read<PregaoFill[]>("pregao_fills.json", []); }
+  async addFills(list: PregaoFill[]) {
+    if (!list.length) return;
+    await write("pregao_fills.json", [...(await read<PregaoFill[]>("pregao_fills.json", [])), ...list]);
+  }
+  async clearPregao() {
+    await write("pregao.json", null);
+    await write("pregao_orders.json", []);
+    await write("pregao_fills.json", []);
+  }
 }

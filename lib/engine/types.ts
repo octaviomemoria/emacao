@@ -7,6 +7,7 @@ export interface Candle {
   low: number;
   close: number;
   volume: number; // volume em ações (sem ajuste)
+  raw?: { open: number; high: number; low: number; close: number }; // preços brutos do pregão (execução do pregão simulado)
 }
 
 export interface Params {

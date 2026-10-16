@@ -3,9 +3,11 @@ import { buildAsset, buildUniverse, runUntil, startSim, equityAt } from "@/lib/e
 import { realPositions } from "@/lib/engine/real";
 import type { AssetSignal, Candle } from "@/lib/engine/types";
 import { fetchCdi } from "@/lib/providers/bcb";
-import { fetchYahoo, nowBRT } from "@/lib/providers/yahoo";
+import { fetchYahoo, nowBRT, type SplitEvent } from "@/lib/providers/yahoo";
 import { notifyAll, type NotifyResult } from "@/lib/notify/dispatch";
 import type { AlertItem, Store } from "@/lib/store/types";
+import { runPregaoJob } from "@/lib/jobs/pregao";
+import type { OrderOutcome } from "@/lib/engine/pregao";
 
 type NewAlert = Omit<AlertItem, "id" | "createdAt" | "read">;
 
@@ -16,6 +18,32 @@ export interface DailyResult {
   newAlerts: number;
   notify: NotifyResult[];
   simEquity: number;
+  pregao: { sessions: number; executed: number; closedWithoutFill: number };
+}
+
+/** alertas das ordens do pregão simulado processadas nesta rodada */
+function pregaoAlerts(outcomes: OrderOutcome[], gapPct: number): NewAlert[] {
+  const out: NewAlert[] = [];
+  for (const { order: o } of outcomes) {
+    const tipo = o.type === "MARKET" ? "a mercado" : o.type === "LIMIT" ? `limite ${brl(o.limitPrice ?? 0)}` : `stop ${brl(o.stopPrice ?? 0)}`;
+    const head = `${o.side === "BUY" ? "Compra" : "Venda"} ${o.ticker} (${tipo}, ${o.qty} ações)`;
+    const sess = o.sessionDate ?? "";
+    if (o.status === "EXECUTED" || o.status === "PARTIAL") {
+      out.push({
+        type: o.status === "EXECUTED" ? "PREGAO_EXECUTADA" : "PREGAO_PARCIAL", ticker: o.ticker, dedupe: `PREG:${o.id}:${o.status}`,
+        title: `${head}: ${o.filledQty} executada(s) a ${brl(o.avgPrice)}`,
+        body: `pregão ${sess} · taxas ${brl(o.fees)}${o.reason ? ` · ${o.reason}` : ""}`,
+      });
+    } else if (o.status === "BLOCKED") {
+      out.push({ type: "PREGAO_BLOQUEADA", ticker: o.ticker, dedupe: `PREG:${o.id}:BLOCKED`, title: `${head}: bloqueada`, body: `pregão ${sess} · ${o.reason ?? ""}` });
+    } else if (o.status === "NOT_EXECUTED") {
+      out.push({ type: "PREGAO_NAO_EXECUTADA", ticker: o.ticker, dedupe: `PREG:${o.id}:NOT`, title: `${head}: não executada`, body: `pregão ${sess} · ${o.reason ?? ""} · validade do dia encerrada` });
+    }
+    if (o.type === "MARKET" && o.gap !== undefined && Math.abs(o.gap) >= gapPct) {
+      out.push({ type: "PREGAO_GAP", ticker: o.ticker, dedupe: `PGAP:${o.id}`, title: `${o.ticker}: abertura com gap de ${pct(o.gap)}`, body: `pregão ${sess} · a execução a mercado pode ter ficado distante do fechamento anterior` });
+    }
+  }
+  return out;
 }
 
 const brl = (v: number) => v.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
@@ -41,10 +69,12 @@ export async function runDaily(store: Store, opts: { now?: Date; notify?: boolea
   // 1) preços (re-baixa o período inteiro: os ajustes por proventos mudam o histórico)
   const skipped: { ticker: string; reason: string }[] = [];
   const data = new Map<string, Candle[]>();
+  const splits = new Map<string, SplitEvent[]>();
   await pool(assets, 6, async (a) => {
     try {
-      const c = await fetchYahoo(a.ticker, from, now);
-      if (c.length) { data.set(a.ticker, c); await store.savePrices(a.ticker, c); return; }
+      const r = await fetchYahoo(a.ticker, from, now);
+      const c = r.candles;
+      if (c.length) { data.set(a.ticker, c); splits.set(a.ticker, r.splits); await store.savePrices(a.ticker, c); return; }
       throw new Error("sem candles");
     } catch (e) {
       const stored = await store.getPrices(a.ticker);
@@ -96,6 +126,14 @@ export async function runDaily(store: Store, opts: { now?: Date; notify?: boolea
   await store.saveSim(sim);
   const equity = equityAt(sim, u, refDate);
 
+  // 4b) pregão simulado: executa as ordens digitadas pelo usuário contra a faixa do pregão
+  const pregaoRun = await runPregaoJob(store, { data, splits, refDate, pregao: settings.pregao, params: p, cdiMap, now });
+  const pregaoSummary = {
+    sessions: pregaoRun.sessions.length,
+    executed: pregaoRun.outcomes.filter((o) => o.order.status === "EXECUTED" || o.order.status === "PARTIAL").length,
+    closedWithoutFill: pregaoRun.outcomes.filter((o) => o.order.status === "NOT_EXECUTED" || o.order.status === "BLOCKED").length,
+  };
+
   // 5) alertas
   const prefs = settings.alertPrefs;
   const items: NewAlert[] = [];
@@ -145,10 +183,12 @@ export async function runDaily(store: Store, opts: { now?: Date; notify?: boolea
     }
     for (const k of skipped) items.push({ type: "DATA_ISSUE", ticker: k.ticker, dedupe: `DATA:${k.ticker}:${k.reason.slice(0, 20)}:${refDate.slice(0, 7)}`, title: `Dados de ${k.ticker}: ${k.reason}`, body: "ativo ignorado ou com dados antigos nesta rodada" });
   }
+  items.push(...pregaoAlerts(pregaoRun.outcomes, settings.pregao.gapPct));
   const fresh = await store.addAlerts(items);
   const sent = opts.notify === false ? [] : await notifyAll(store, fresh);
-  await store.appendJobLog({ at: new Date().toISOString(), job: "daily", ok: true, message: `ref ${refDate} · ${valid.length} ativos · ${fresh.length} alertas novos · patrimônio simulado ${brl(equity)}` });
-  return { refDate, assets: valid.length, skipped, newAlerts: fresh.length, notify: sent, simEquity: equity };
+  const pregaoTxt = pregaoSummary.sessions ? ` · pregão simulado: ${pregaoSummary.sessions} sessão(ões), ${pregaoSummary.executed} execução(ões)` : "";
+  await store.appendJobLog({ at: new Date().toISOString(), job: "daily", ok: true, message: `ref ${refDate} · ${valid.length} ativos · ${fresh.length} alertas novos · patrimônio simulado ${brl(equity)}${pregaoTxt}` });
+  return { refDate, assets: valid.length, skipped, newAlerts: fresh.length, notify: sent, simEquity: equity, pregao: pregaoSummary };
 }
 
 /** Lembrete da manhã: lista o que a rotina noturna deixou pendente para a abertura de hoje. */

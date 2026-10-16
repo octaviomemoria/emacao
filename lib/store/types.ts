@@ -1,10 +1,12 @@
 import type { AssetSignal, Candle, Params, SimState } from "@/lib/engine/types";
 import { DEFAULT_PARAMS } from "@/lib/engine/types";
+import { DEFAULT_PREGAO, type PregaoFill, type PregaoOrder, type PregaoSettings, type PregaoState } from "@/lib/engine/pregao";
 
 export interface Asset { ticker: string; name?: string; sector?: string; enabled: boolean }
 
 export interface Settings {
   params: Params;
+  pregao: PregaoSettings;
   simCapital: number;
   historyYears: number; // anos de histórico baixados
   maxStaleDays: number; // ativo sem candle há mais dias que isso é ignorado
@@ -17,6 +19,7 @@ export interface Settings {
 
 export const DEFAULT_SETTINGS: Settings = {
   params: DEFAULT_PARAMS,
+  pregao: DEFAULT_PREGAO,
   simCapital: 100000,
   historyYears: 3,
   maxStaleDays: 4,
@@ -33,7 +36,9 @@ export const DEFAULT_ASSETS: Asset[] = T.split(" ").map((ticker) => ({ ticker, e
 
 export interface Tx { id: string; date: string; ticker: string; side: "BUY" | "SELL"; qty: number; price: number; fees: number; note?: string }
 
-export type AlertType = "BUY" | "SELL" | "REAL_SELL" | "SIM_CLOSED" | "NEAR_TRIGGER" | "DATA_ISSUE" | "DIVERGENCE" | "INFO";
+export type AlertType =
+  | "BUY" | "SELL" | "REAL_SELL" | "SIM_CLOSED" | "NEAR_TRIGGER" | "DATA_ISSUE" | "DIVERGENCE" | "INFO"
+  | "PREGAO_EXECUTADA" | "PREGAO_PARCIAL" | "PREGAO_NAO_EXECUTADA" | "PREGAO_BLOQUEADA" | "PREGAO_GAP";
 export interface AlertItem { id: string; createdAt: string; type: AlertType; ticker?: string; title: string; body: string; read: boolean; dedupe: string }
 
 export interface Channels { telegramChatId?: string; email?: string; pushEnabled: boolean }
@@ -71,4 +76,14 @@ export interface Store {
   removePushSub(endpoint: string): Promise<void>;
   appendJobLog(e: JobLogEntry): Promise<void>;
   listJobLog(limit: number): Promise<JobLogEntry[]>;
+  // pregão simulado
+  getPregao(): Promise<PregaoState | null>;
+  savePregao(s: PregaoState | null): Promise<void>;
+  listOrders(): Promise<PregaoOrder[]>;
+  /** insere ou atualiza ordens pelo id */
+  upsertOrders(list: PregaoOrder[]): Promise<void>;
+  listFills(): Promise<PregaoFill[]>;
+  addFills(list: PregaoFill[]): Promise<void>;
+  /** apaga o pregão simulado inteiro (estado, ordens e fills) */
+  clearPregao(): Promise<void>;
 }
