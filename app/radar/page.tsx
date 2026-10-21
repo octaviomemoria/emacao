@@ -65,7 +65,7 @@ export default async function Radar({ searchParams }: { searchParams: Promise<{ 
             <tbody>
               {rows.map((s) => (
                 <tr key={s.ticker}>
-                  <td><Link href={`/radar?estado=${estado}&t=${s.ticker}`} className="font-semibold hover:underline">{s.ticker}</Link></td>
+                  <td><Link href={`/ativo/${s.ticker}`} className="font-semibold hover:underline">{s.ticker}</Link></td>
                   <td>{s.isNewBreakout ? <Badge tone="blue">rompimento novo</Badge> : s.isNewExit ? <Badge tone="red">saída nova</Badge> : s.state === 1 ? <Badge tone="green">em tendência</Badge> : <Badge>fora</Badge>}</td>
                   <td className="num">{brl(s.price)}</td>
                   <td className="num">{brl(s.buyLevel)}</td><td className="num">{s.state === 1 ? "—" : spct(s.distBuyPct)}</td>
