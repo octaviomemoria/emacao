@@ -9,7 +9,7 @@ const L = ({ label, children }: { label: string; children: React.ReactNode }) =>
 
 /** cria uma carteira simulada com nome, capital inicial e parâmetros próprios */
 export function CarteiraCreateForm({ defaults }: {
-  defaults: { slippagePct: number; participationPct: number; feePct: number; fixedFee: number; gapPct: number; capital: number };
+  defaults: { slippagePct: number; participationPct: number; feePct: number; fixedFee: number; gapPct: number; impactEta: number; capital: number };
 }) {
   const [r, act, pending] = useActionState(createCarteiraAction, null as R);
   return (
@@ -21,6 +21,7 @@ export function CarteiraCreateForm({ defaults }: {
       <L label="Emolumentos (%)"><input name="feePct" inputMode="decimal" defaultValue={defaults.feePct} /></L>
       <L label="Corretagem (R$ por ordem)"><input name="fixedFee" inputMode="decimal" defaultValue={defaults.fixedFee} /></L>
       <L label="Alerta de gap (%)"><input name="gapPct" inputMode="decimal" defaultValue={defaults.gapPct} /></L>
+      <L label="Impacto de mercado (η)"><input name="impactEta" inputMode="decimal" defaultValue={defaults.impactEta} /></L>
       <div className="flex items-center gap-2">
         <button className="btn" disabled={pending}>{pending ? "Criando…" : "Criar carteira"}</button>
         {r?.error && <span className="text-sm text-red-500">{r.error}</span>}

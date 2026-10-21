@@ -4,6 +4,7 @@ import {
   type DayInput, type OrderOutcome, type PregaoFill, type PregaoSettings, type PregaoState,
 } from "@/lib/engine/pregao";
 import type { Candle, Params } from "@/lib/engine/types";
+import { priorMarketStats } from "@/lib/engine/impact";
 import type { SplitEvent } from "@/lib/providers/yahoo";
 import type { Store } from "@/lib/store/types";
 
@@ -77,13 +78,20 @@ export async function runPregaoJob(
       const c = candles[i];
       const prev = i > 0 ? candles[i - 1] : undefined;
       const prevRaw = prev ? (prev.raw?.close ?? prev.close) : 0;
-      const anomaly = !!prev && prev.close > 0 && Math.abs(c.close / prev.close - 1) > args.params.anomalyLimit;
+      // dado suspeito: salto no fechamento ajustado, ou salto no bruto sem evento de desdobramento/grupamento
+      // registrado pelo provedor (o preço bruto muda no desdobramento; o ajustado não)
+      const adjAnomaly = !!prev && prev.close > 0 && Math.abs(c.close / prev.close - 1) > args.params.anomalyLimit;
+      const splitToday = (args.splits.get(ticker) ?? []).some((s) => s.date === d);
+      const rawJump = !!c.raw && prevRaw > 0 && Math.abs(c.raw.close / prevRaw - 1) > args.params.anomalyLimit && !splitToday;
+      const stats = priorMarketStats(candles, i);
       const b = c.raw ?? { open: c.open, high: c.high, low: c.low, close: c.close };
       inputs.set(ticker, {
         bar: { open: b.open, high: b.high, low: b.low, close: b.close, volume: c.volume },
         prevClose: prevRaw,
         hasRaw: !!c.raw,
-        anomaly,
+        anomaly: adjAnomaly || rawJump,
+        adv: stats?.adv,
+        sigma: stats?.sigma,
       });
     }
 

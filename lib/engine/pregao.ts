@@ -6,6 +6,7 @@
  *  - quantidade máxima por pregão = participation × volume do dia (o restante é cancelado: validade "dia");
  *  - a execução usa preços brutos (sem ajuste por proventos), como um pregão real.
  */
+import { DEFAULT_IMPACT_ETA, sqrtImpactRel } from "./impact";
 import type { Candle } from "./types";
 
 export type OrderSide = "BUY" | "SELL";
@@ -72,11 +73,12 @@ export interface PregaoState {
 
 export interface PregaoSettings {
   capital: number; // capital inicial do pregão simulado (R$)
-  slippage: number; // deslizamento contra o investidor (0.001 = 0,10%)
+  slippage: number; // deslizamento de spread contra o investidor (0.001 = 0,10%)
   participation: number; // máximo do volume do dia por ordem (0.05 = 5%)
   feePct: number; // emolumentos sobre o valor da operação (0.000325 = 0,0325%)
   fixedFee: number; // corretagem fixa por ordem (R$)
   gapPct: number; // alerta de abertura com gap (0.05 = 5%)
+  impactEta: number; // elasticidade do impacto de mercado por raiz quadrada (η, 0,5 = padrão)
 }
 
 export const DEFAULT_PREGAO: PregaoSettings = {
@@ -86,6 +88,7 @@ export const DEFAULT_PREGAO: PregaoSettings = {
   feePct: 0.000325,
   fixedFee: 0,
   gapPct: 0.05,
+  impactEta: 0.5,
 };
 
 /** barra bruta do pregão de um ativo, com o fechamento do pregão anterior */
@@ -93,7 +96,9 @@ export interface DayInput {
   bar: { open: number; high: number; low: number; close: number; volume: number } | null;
   prevClose: number;
   hasRaw: boolean; // false quando o candle não tem preços brutos salvos (não executa)
-  anomaly: boolean; // variação do fechamento acima do limite de dado suspeito (não executa)
+  anomaly: boolean; // dado suspeito: variação ajustada acima do limite, ou salto bruto sem evento de desdobramento
+  adv?: number; // volume médio diário dos pregões anteriores (impacto de mercado)
+  sigma?: number; // volatilidade diária dos pregões anteriores (impacto de mercado)
 }
 
 export interface FillResult {
@@ -119,9 +124,17 @@ export function fillOrder(
   const cap = Math.floor(b.volume * s.participation);
   if (cap < 1) return { status: "NOT_EXECUTED", qty: 0, price: 0, reason: "liquidez insuficiente nesta sessão" };
 
+  // quantidade executada nesta sessão (limitada à participação no volume do dia)
+  const qty = Math.min(order.qty, cap);
+  // impacto de mercado por raiz quadrada, sobre a quantidade executada (só a mercado e stop; o limite protege o preço)
+  const impact = input.adv && input.sigma !== undefined && input.adv > 0
+    ? sqrtImpactRel(qty, input.adv, input.sigma, s.impactEta ?? DEFAULT_IMPACT_ETA)
+    : 0;
+  const adverse = s.slippage + impact;
+
   let price: number | null = null;
   if (order.type === "MARKET") {
-    price = order.side === "BUY" ? b.open * (1 + s.slippage) : b.open * (1 - s.slippage);
+    price = order.side === "BUY" ? b.open * (1 + adverse) : b.open * (1 - adverse);
   } else if (order.type === "LIMIT") {
     const lim = order.limitPrice ?? 0;
     if (order.side === "BUY" && b.low <= lim) price = Math.min(lim, b.open);
@@ -129,12 +142,12 @@ export function fillOrder(
   } else if (order.type === "STOP") {
     if (order.side !== "SELL") return { status: "NOT_EXECUTED", qty: 0, price: 0, reason: "stop só existe para venda" };
     const stop = order.stopPrice ?? 0;
-    if (b.low <= stop) price = (b.open <= stop ? b.open : stop) * (1 - s.slippage);
+    if (b.low <= stop) price = (b.open <= stop ? b.open : stop) * (1 - adverse);
   }
   if (price === null) {
     return { status: "NOT_EXECUTED", qty: 0, price: 0, reason: order.type === "STOP" ? "stop não atingido" : "limite não atingido", gap };
   }
-  const qty = Math.min(order.qty, cap);
+  if (!(price > 0)) return { status: "BLOCKED", qty: 0, price: 0, reason: "impacto de mercado excessivo para este volume (divida a ordem)" };
   return {
     status: qty === order.qty ? "EXECUTED" : "PARTIAL",
     qty,

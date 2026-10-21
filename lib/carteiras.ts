@@ -18,7 +18,9 @@ export interface OrderInput {
 /** parâmetros da carteira: os da carteira padrão (Pregão) ou os da carteira simulada */
 export async function getParams(store: Store, pid: string): Promise<PregaoSettings | null> {
   if (pid === PREGAO_DEFAULT) return (await store.getSettings()).pregao;
-  return (await store.listCarteiras()).find((c) => c.id === pid)?.params ?? null;
+  const c = (await store.listCarteiras()).find((x) => x.id === pid);
+  // carteiras criadas antes de um parâmetro existir recebem o padrão para ele
+  return c ? { ...DEFAULT_PREGAO, ...c.params } : null;
 }
 
 /** valida e registra uma ordem; devolve a mensagem de erro, ou null se registrou */

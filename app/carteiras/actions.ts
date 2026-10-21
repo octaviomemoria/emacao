@@ -23,6 +23,7 @@ function paramsFrom(fd: FormData, base: PregaoSettings): Partial<PregaoSettings>
     feePct: Math.min(0.01, Math.max(0, n(fd, "feePct", base.feePct * 100) / 100)),
     fixedFee: Math.max(0, n(fd, "fixedFee", base.fixedFee)),
     gapPct: Math.min(1, Math.max(0, n(fd, "gapPct", base.gapPct * 100) / 100)),
+    impactEta: Math.min(2, Math.max(0, n(fd, "impactEta", base.impactEta))),
   };
 }
 

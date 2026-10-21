@@ -42,6 +42,7 @@ export default async function Carteiras() {
           feePct: +(settings.pregao.feePct * 100).toFixed(5),
           fixedFee: settings.pregao.fixedFee,
           gapPct: +(settings.pregao.gapPct * 100).toFixed(4),
+          impactEta: settings.pregao.impactEta,
           capital: 100000,
         }} />
       </Card>

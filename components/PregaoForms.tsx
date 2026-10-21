@@ -94,6 +94,7 @@ export function PregaoSettingsForm({ pg, action, pid }: { pg: PregaoSettings; ac
       <L label="Emolumentos (%)"><input name="feePct" inputMode="decimal" defaultValue={+(pg.feePct * 100).toFixed(5)} /></L>
       <L label="Corretagem (R$ por ordem)"><input name="fixedFee" inputMode="decimal" defaultValue={pg.fixedFee} /></L>
       <L label="Alerta de gap na abertura (%)"><input name="gapPct" inputMode="decimal" defaultValue={+(pg.gapPct * 100).toFixed(4)} /></L>
+      <L label="Impacto de mercado (η)"><input name="impactEta" inputMode="decimal" defaultValue={pg.impactEta} /></L>
       <div className="flex items-center gap-2 sm:col-span-3">
         <button className="btn" disabled={pending}>{pending ? "Salvando…" : "Salvar parâmetros"}</button>
         <Msg r={r} />

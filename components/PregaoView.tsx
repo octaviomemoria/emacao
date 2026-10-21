@@ -2,7 +2,8 @@ import type { ReactNode } from "react";
 import LineChart from "@/components/LineChart";
 import { PregaoResetForm, PregaoSettingsForm, PregaoTicket } from "@/components/PregaoForms";
 import { Badge, Card, Disclaimer, Empty, Stat } from "@/components/ui";
-import { brl, dmy, num, spct, tone } from "@/lib/format";
+import { brl, dmy, num, pct, spct, tone } from "@/lib/format";
+import { riskReport } from "@/lib/engine/risk";
 import { pregaoEquity, type OrderStatus, type PregaoFill, type PregaoOrder, type PregaoSettings, type PregaoState } from "@/lib/engine/pregao";
 
 type R = { ok?: boolean; error?: string } | null;
@@ -49,6 +50,7 @@ export default function PregaoView({ pid, title, intro, st, orders, fills, pg, t
   const cdiNet = st ? st.curve[st.curve.length - 1].cdiNet / capital - 1 : 0;
   const ret = equity / capital - 1;
   const curve = st && st.curve.length > 400 ? st.curve.filter((_, i) => i % Math.ceil(st.curve.length / 400) === 0 || i === st.curve.length - 1) : st?.curve ?? [];
+  const risk = st ? riskReport(st.curve.map((c) => c.equity)) : null;
   const recent = [...orders].sort((a, b) => b.createdAt.localeCompare(a.createdAt)).slice(0, 60);
   const recentFills = [...fills].sort((a, b) => b.date.localeCompare(a.date)).slice(0, 60);
 
@@ -69,6 +71,20 @@ export default function PregaoView({ pid, title, intro, st, orders, fills, pg, t
           <Stat label="Taxas pagas" value={brl(st?.feesPaidTotal ?? 0, 0)} sub={`IR pago ${brl(st?.taxPaidTotal ?? 0, 0)}`} />
         </div>
         {!st && <p className="mt-3 text-xs opacity-70">A carteira ainda não começou. Ela inicia com a primeira ordem ou na próxima atualização.</p>}
+      </Card>
+
+      <Card title="Risco da carteira">
+        {risk ? (
+          <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-6">
+            <Stat label="Volatilidade anual" value={pct(risk.volatility)} sub={`${risk.days} pregões`} />
+            <Stat label="VaR 95% (1 dia)" value={pct(risk.var95, 2)} sub="perda que não foi superada em 95% dos dias" />
+            <Stat label="VaR 99% (1 dia)" value={pct(risk.var99, 2)} />
+            <Stat label="Déficit esperado 95%" value={pct(risk.cvar95, 2)} sub="média das perdas acima do VaR 95%" />
+            <Stat label="Queda máxima" value={pct(risk.maxDrawdown)} />
+            <Stat label="Ordens executadas" value={fills.length} />
+          </div>
+        ) : <Empty>Poucos pregões para estimar o risco (mínimo de 20).</Empty>}
+        <p className="mt-3 text-xs opacity-60">Estimativas históricas, feitas só com os pregões já processados. O passado não garante o futuro.</p>
       </Card>
 
       <Card title="Nova ordem">
