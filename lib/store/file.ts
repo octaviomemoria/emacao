@@ -4,6 +4,7 @@ import path from "node:path";
 import { randomUUID } from "node:crypto";
 import type { Candle, SimState } from "@/lib/engine/types";
 import { PREGAO_DEFAULT, type PregaoFill, type PregaoOrder, type PregaoState } from "@/lib/engine/pregao";
+import type { FxMap } from "@/lib/engine/fx";
 import {
   DEFAULT_ASSETS, DEFAULT_SETTINGS,
   type AlertItem, type Asset, type Carteira, type Channels, type JobLogEntry, type PushSub, type Settings, type Snapshot, type Store, type Tx,
@@ -32,6 +33,8 @@ export class FileStore implements Store {
   savePrices(t: string, c: Candle[]) { return write(`prices/${t}.json`, c); }
   getCdi() { return read<Record<string, number>>("cdi.json", {}); }
   saveCdi(c: Record<string, number>) { return write("cdi.json", c); }
+  getFx() { return read<FxMap>("fx.json", {}); }
+  saveFx(fx: FxMap) { return write("fx.json", fx); }
   getSnapshot() { return read<Snapshot | null>("snapshot.json", null); }
   saveSnapshot(s: Snapshot) { return write("snapshot.json", s); }
   getSim() { return read<SimState | null>("sim.json", null); }

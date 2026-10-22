@@ -3,6 +3,7 @@ import { DEFAULT_PREGAO, newPregaoState, PREGAO_DEFAULT, type PregaoOrder, type 
 import { ensurePregaoState } from "@/lib/jobs/pregao";
 import { nowBRT } from "@/lib/providers/yahoo";
 import type { Carteira, Store } from "@/lib/store/types";
+import { TICKER_RE } from "@/lib/tickers";
 
 export const brlTxt = (v: number) => v.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
 
@@ -26,7 +27,7 @@ export async function getParams(store: Store, pid: string): Promise<PregaoSettin
 /** valida e registra uma ordem; devolve a mensagem de erro, ou null se registrou */
 export async function placeOrder(store: Store, pid: string, pg: PregaoSettings, input: OrderInput, today = nowBRT().date): Promise<string | null> {
   const { ticker, side, type, qty, limitPrice, stopPrice } = input;
-  if (!/^[A-Z0-9]{4,6}$/.test(ticker)) return "Informe um ticker válido.";
+  if (!TICKER_RE.test(ticker)) return "Informe um ticker válido.";
   const assets = await store.getAssets();
   if (!assets.some((a) => a.enabled && a.ticker === ticker)) return `${ticker} não está na lista de ativos acompanhados (Configurações).`;
   if (!(qty > 0)) return "A quantidade deve ser um número inteiro maior que zero.";

@@ -1,8 +1,10 @@
 import type { AssetSignal, Candle, Params, SimState } from "@/lib/engine/types";
 import { DEFAULT_PARAMS } from "@/lib/engine/types";
 import { DEFAULT_PREGAO, type PregaoFill, type PregaoOrder, type PregaoSettings, type PregaoState } from "@/lib/engine/pregao";
+import type { FxMap } from "@/lib/engine/fx";
 
-export interface Asset { ticker: string; name?: string; sector?: string; enabled: boolean }
+/** market ausente significa B3 (registros anteriores às ações estrangeiras) */
+export interface Asset { ticker: string; name?: string; sector?: string; market?: "B3" | "EXT"; enabled: boolean }
 
 export interface Settings {
   params: Params;
@@ -58,6 +60,9 @@ export interface Store {
   savePrices(ticker: string, c: Candle[]): Promise<void>;
   getCdi(): Promise<Record<string, number>>;
   saveCdi(c: Record<string, number>): Promise<void>;
+  /** câmbio diário (reais por dólar) usado para converter as ações estrangeiras */
+  getFx(): Promise<FxMap>;
+  saveFx(fx: FxMap): Promise<void>;
   getSnapshot(): Promise<Snapshot | null>;
   saveSnapshot(s: Snapshot): Promise<void>;
   getSim(): Promise<SimState | null>;

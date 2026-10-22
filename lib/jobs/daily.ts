@@ -8,6 +8,8 @@ import { notifyAll, type NotifyResult } from "@/lib/notify/dispatch";
 import type { AlertItem, Store } from "@/lib/store/types";
 import { runPregaoJob } from "@/lib/jobs/pregao";
 import type { OrderOutcome } from "@/lib/engine/pregao";
+import { convertToBRL, type FxMap } from "@/lib/engine/fx";
+import { isExterior, yahooSymbol } from "@/lib/tickers";
 
 type NewAlert = Omit<AlertItem, "id" | "createdAt" | "read">;
 
@@ -66,16 +68,30 @@ export async function runDaily(store: Store, opts: { now?: Date; notify?: boolea
   const assets = (await store.getAssets()).filter((a) => a.enabled);
   const from = new Date(now.getTime() - settings.historyYears * 365.25 * 86400000).toISOString().slice(0, 10);
 
-  // 1) preços (re-baixa o período inteiro: os ajustes por proventos mudam o histórico)
   const skipped: { ticker: string; reason: string }[] = [];
+  const exterior = new Set(assets.filter(isExterior).map((a) => a.ticker));
+
+  // 0) câmbio (reais por dólar), só quando há ações estrangeiras: converte os preços delas para reais
+  let fx: FxMap = await store.getFx();
+  if (exterior.size) {
+    try {
+      const r = await fetchYahoo("BRL=X", from, now);
+      fx = { ...fx, ...Object.fromEntries(r.candles.map((c) => [c.date, c.close])) };
+      await store.saveFx(fx);
+    } catch (e) {
+      skipped.push({ ticker: "USD/BRL", reason: `falha ao baixar câmbio (${(e as Error).message}), usando o último salvo` });
+    }
+  }
+
+  // 1) preços (re-baixa o período inteiro: os ajustes por proventos mudam o histórico)
   const data = new Map<string, Candle[]>();
   const splits = new Map<string, SplitEvent[]>();
   await pool(assets, 6, async (a) => {
     try {
-      const r = await fetchYahoo(a.ticker, from, now);
-      const c = r.candles;
-      if (c.length) { data.set(a.ticker, c); splits.set(a.ticker, r.splits); await store.savePrices(a.ticker, c); return; }
-      throw new Error("sem candles");
+      const r = await fetchYahoo(yahooSymbol(a), from, now);
+      const c = isExterior(a) ? convertToBRL(r.candles, fx) : r.candles;
+      if (c?.length) { data.set(a.ticker, c); splits.set(a.ticker, r.splits); await store.savePrices(a.ticker, c); return; }
+      throw new Error(isExterior(a) ? "sem câmbio para converter em reais" : "sem candles");
     } catch (e) {
       const stored = await store.getPrices(a.ticker);
       if (stored.length) { data.set(a.ticker, stored); skipped.push({ ticker: a.ticker, reason: `download falhou, usando dados salvos (${(e as Error).message})` }); }
@@ -112,7 +128,8 @@ export async function runDaily(store: Store, opts: { now?: Date; notify?: boolea
     if (c.length < p.N + 5) { skipped.push({ ticker: a.ticker, reason: "histórico curto" }); continue; }
     const series = computeSeries(c, p);
     signals.push(lastSignal(a.ticker, c, series, p));
-    valid.push(buildAsset(a.ticker, c, series));
+    // ações estrangeiras aparecem nos sinais (Radar), mas não na simulação automática: ela aplica uma só alíquota de IR
+    if (!exterior.has(a.ticker)) valid.push(buildAsset(a.ticker, c, series));
   }
   const u = buildUniverse(valid);
   await store.saveSnapshot({ date: refDate, generatedAt: new Date().toISOString(), signals, skipped });
@@ -127,7 +144,7 @@ export async function runDaily(store: Store, opts: { now?: Date; notify?: boolea
   const equity = equityAt(sim, u, refDate);
 
   // 4b) pregão simulado: executa as ordens digitadas pelo usuário contra a faixa do pregão
-  const pregaoRun = await runPregaoJob(store, { data, splits, refDate, pregao: settings.pregao, params: p, cdiMap, now });
+  const pregaoRun = await runPregaoJob(store, { data, splits, refDate, pregao: settings.pregao, params: p, cdiMap, exterior, now });
   const pregaoSummary = {
     sessions: pregaoRun.sessions.length,
     executed: pregaoRun.outcomes.filter((o) => o.order.status === "EXECUTED" || o.order.status === "PARTIAL").length,
@@ -138,7 +155,7 @@ export async function runDaily(store: Store, opts: { now?: Date; notify?: boolea
   const carteiras = await store.listCarteiras();
   const carteiraRuns: { name: string; params: typeof settings.pregao; outcomes: OrderOutcome[] }[] = [];
   for (const c of carteiras) {
-    const r = await runPregaoJob(store, { pid: c.id, data, splits, refDate, pregao: c.params, params: p, cdiMap, now });
+    const r = await runPregaoJob(store, { pid: c.id, data, splits, refDate, pregao: c.params, params: p, cdiMap, exterior, now });
     carteiraRuns.push({ name: c.name, params: c.params, outcomes: r.outcomes });
   }
 
@@ -198,8 +215,8 @@ export async function runDaily(store: Store, opts: { now?: Date; notify?: boolea
   const carteiraExec = carteiraRuns.reduce((a, cr) => a + cr.outcomes.filter((o) => o.order.status === "EXECUTED" || o.order.status === "PARTIAL").length, 0);
   const pregaoTxt = pregaoSummary.sessions ? ` · pregão simulado: ${pregaoSummary.sessions} sessão(ões), ${pregaoSummary.executed} execução(ões)` : "";
   const carteiraTxt = carteiras.length ? ` · carteiras simuladas: ${carteiras.length}, ${carteiraExec} execução(ões)` : "";
-  await store.appendJobLog({ at: new Date().toISOString(), job: "daily", ok: true, message: `ref ${refDate} · ${valid.length} ativos · ${fresh.length} alertas novos · patrimônio simulado ${brl(equity)}${pregaoTxt}${carteiraTxt}` });
-  return { refDate, assets: valid.length, skipped, newAlerts: fresh.length, notify: sent, simEquity: equity, pregao: pregaoSummary };
+  await store.appendJobLog({ at: new Date().toISOString(), job: "daily", ok: true, message: `ref ${refDate} · ${signals.length} ativos · ${fresh.length} alertas novos · patrimônio simulado ${brl(equity)}${pregaoTxt}${carteiraTxt}` });
+  return { refDate, assets: signals.length, skipped, newAlerts: fresh.length, notify: sent, simEquity: equity, pregao: pregaoSummary };
 }
 
 /** Lembrete da manhã: lista o que a rotina noturna deixou pendente para a abertura de hoje. */

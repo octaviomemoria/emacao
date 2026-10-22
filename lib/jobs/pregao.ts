@@ -3,6 +3,7 @@ import {
   applySplit, newPregaoState, PREGAO_DEFAULT, processPregaoDay,
   type DayInput, type OrderOutcome, type PregaoFill, type PregaoSettings, type PregaoState,
 } from "@/lib/engine/pregao";
+import { FOREIGN_TAX_RATE } from "@/lib/engine/real";
 import type { Candle, Params } from "@/lib/engine/types";
 import { priorMarketStats } from "@/lib/engine/impact";
 import type { SplitEvent } from "@/lib/providers/yahoo";
@@ -27,7 +28,7 @@ export async function ensurePregaoState(store: Store, capital: number, date: str
 /**
  * Executa as ordens de uma carteira de pregão para cada pregão novo presente nos dados desta rodada.
  * Ordens de tickers sem dados nesta rodada continuam abertas. Ordens de tickers com dados mas sem
- * candle naquele pregão encerram como "sem negociação".
+ * candle naquele pregão esperam até MAX_WAIT_DAYS dias (feriado no mercado do ativo) e depois encerram.
  */
 export async function runPregaoJob(
   store: Store,
@@ -39,6 +40,7 @@ export async function runPregaoJob(
     pregao: PregaoSettings;
     params: Params;
     cdiMap: Map<string, number>;
+    exterior?: Set<string>; // tickers de ações estrangeiras (apuração de IR separada)
     now: Date;
   },
 ): Promise<PregaoRunResult> {
@@ -92,12 +94,13 @@ export async function runPregaoJob(
         anomaly: adjAnomaly || rawJump,
         adv: stats?.adv,
         sigma: stats?.sigma,
+        exterior: args.exterior?.has(ticker),
       });
     }
 
     const r = processPregaoDay(
       st, orders, d, inputs, args.pregao,
-      { cdiRate: args.cdiMap.get(d) ?? 0, cdiTaxRate: args.params.cdiTaxRate, taxRate: args.params.taxRate },
+      { cdiRate: args.cdiMap.get(d) ?? 0, cdiTaxRate: args.params.cdiTaxRate, taxRate: args.params.taxRate, foreignTaxRate: FOREIGN_TAX_RATE },
       randomUUID,
     );
     orders = r.orders;

@@ -10,6 +10,7 @@ import { loadUniverse } from "@/lib/jobs/universe";
 import { notifyAll } from "@/lib/notify/dispatch";
 import { getStore } from "@/lib/store";
 import type { Asset } from "@/lib/store/types";
+import { TICKER_RE } from "@/lib/tickers";
 
 type FormState = { ok?: boolean; error?: string } | null;
 
@@ -35,7 +36,7 @@ export async function addTx(_: FormState, fd: FormData): Promise<FormState> {
   const side = fd.get("side") === "SELL" ? "SELL" : "BUY";
   const date = String(fd.get("date") ?? "");
   const qty = n(fd, "qty"), price = n(fd, "price"), fees = n(fd, "fees");
-  if (!/^[A-Z0-9]{4,6}$/.test(ticker) || !/^\d{4}-\d{2}-\d{2}$/.test(date) || qty <= 0 || price <= 0) return { error: "Confira ticker, data, quantidade e preço." };
+  if (!TICKER_RE.test(ticker) || !/^\d{4}-\d{2}-\d{2}$/.test(date) || qty <= 0 || price <= 0) return { error: "Confira ticker, data, quantidade e preço." };
   await (await getStore()).addTx({ date, ticker, side, qty, price, fees, note: String(fd.get("note") ?? "") || undefined });
   revalidatePath("/carteira");
   return { ok: true };
@@ -88,10 +89,14 @@ export async function saveChannels(_: FormState, fd: FormData): Promise<FormStat
 }
 
 export async function saveAssets(_: FormState, fd: FormData): Promise<FormState> {
-  const raw = String(fd.get("tickers") ?? "");
-  const tickers = [...new Set(raw.split(/[\s,;]+/).map((t) => t.trim().toUpperCase().replace(/\.SA$/, "")).filter((t) => /^[A-Z0-9]{4,6}$/.test(t)))];
-  if (!tickers.length) return { error: "Informe ao menos um ticker." };
-  const assets: Asset[] = tickers.map((ticker) => ({ ticker, enabled: true }));
+  const list = (raw: string) => [...new Set(raw.split(/[\s,;]+/).map((t) => t.trim().toUpperCase().replace(/\.SA$/, "")).filter((t) => TICKER_RE.test(t)))];
+  const b3 = list(String(fd.get("tickers") ?? ""));
+  const ext = list(String(fd.get("exterior") ?? "")).filter((t) => !b3.includes(t));
+  if (!b3.length && !ext.length) return { error: "Informe ao menos um ticker." };
+  const assets: Asset[] = [
+    ...b3.map((ticker) => ({ ticker, market: "B3" as const, enabled: true })),
+    ...ext.map((ticker) => ({ ticker, market: "EXT" as const, enabled: true })),
+  ];
   await (await getStore()).saveAssets(assets);
   revalidatePath("/", "layout");
   return { ok: true };

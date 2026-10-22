@@ -185,12 +185,23 @@ describe("processamento de um pregão", () => {
     expect(r.orders[0].status).toBe("OPEN");
   });
 
-  it("ticker com dados mas sem candle no pregão encerra a ordem como não executada", () => {
+  it("ticker com dados mas sem candle no pregão espera e, após 5 dias, encerra a ordem como não executada", () => {
     const st = newPregaoState("2024-01-02", 100000);
     const o = order({ side: "BUY", type: "MARKET", qty: 100 });
-    const r = processPregaoDay(st, [o], "2024-01-03", new Map([["AAAA3", undefined]]), S, RATES, newId);
+    const r = processPregaoDay(st, [o], "2024-01-10", new Map([["AAAA3", undefined]]), S, RATES, newId);
     expect(r.orders[0].status).toBe("NOT_EXECUTED");
-    expect(r.orders[0].reason).toBe("sem negociação nesta sessão");
+    expect(r.orders[0].reason).toBe("sem negociação por mais de 5 dias");
+  });
+
+  it("feriado no mercado do ativo: a ordem fica aberta e executa no primeiro pregão com dados", () => {
+    const st = newPregaoState("2024-01-02", 100000);
+    const o = order({ side: "BUY", type: "MARKET", qty: 100 });
+    const holiday = processPregaoDay(st, [o], "2024-01-03", new Map([["AAAA3", undefined]]), S, RATES, newId);
+    expect(holiday.orders[0].status).toBe("OPEN");
+    expect(holiday.fills).toHaveLength(0);
+    const next = processPregaoDay(st, holiday.orders, "2024-01-04", new Map([["AAAA3", bar()]]), S, RATES, newId);
+    expect(next.orders[0].status).toBe("EXECUTED");
+    expect(next.orders[0].sessionDate).toBe("2024-01-04");
   });
 
   it("marca o patrimônio com o preço bruto do dia e rende o CDI líquido sobre o caixa", () => {
@@ -210,6 +221,26 @@ describe("imposto do pregão", () => {
     const before = st.cash;
     settleTaxIfNewMonth(st, "2024-02-01", 0.15);
     expect(st.cash).toBeCloseTo(before - 150, 6);
+    expect(st.realizedMonth).toBe(0);
+  });
+
+  it("ações estrangeiras têm IR e prejuízo próprios: perda na B3 não reduz o imposto do exterior", () => {
+    const st = newPregaoState("2024-01-02", 100000);
+    st.realizedMonth = -500; // B3
+    st.realizedMonthExt = 1000; // exterior
+    st.lastDate = "2024-01-31";
+    const before = st.cash;
+    settleTaxIfNewMonth(st, "2024-02-01", 0.15, 0.15);
+    expect(st.cash).toBeCloseTo(before - 0.15 * 1000, 6);
+    expect(st.lossCarry).toBe(500);
+    expect(st.lossCarryExt).toBe(0);
+  });
+
+  it("execução de ativo do exterior vai para o resultado do exterior", () => {
+    const st = newPregaoState("2024-01-02", 100000);
+    applyExecution(st, { ticker: "AAPL", side: "BUY", qty: 100, price: 10, date: "2024-01-03", exterior: true }, S);
+    applyExecution(st, { ticker: "AAPL", side: "SELL", qty: 100, price: 12, date: "2024-01-10", exterior: true }, S);
+    expect(st.realizedMonthExt).toBeGreaterThan(190);
     expect(st.realizedMonth).toBe(0);
   });
 

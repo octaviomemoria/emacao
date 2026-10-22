@@ -20,19 +20,20 @@ export function dropPartialToday(candles: Candle[], now = new Date()): Candle[] 
 }
 
 /**
- * Candles diários de um ticker da B3 via endpoint "chart" do Yahoo Finance.
- * Guarda OHLC ajustado (proventos e desdobramentos, para os sinais) e o OHLC bruto (para executar ordens do pregão simulado),
- * além dos eventos de desdobramento/grupamento. Fonte não oficial: por isso o provedor fica isolado aqui.
+ * Candles diários de um símbolo do Yahoo Finance via endpoint "chart": "PETR4.SA" para a B3, "AAPL" para ações
+ * americanas, "BRL=X" para o câmbio. Guarda OHLC ajustado (proventos e desdobramentos, para os sinais) e o OHLC bruto
+ * (para executar ordens do pregão simulado), além dos eventos de desdobramento/grupamento.
+ * Fonte não oficial: por isso o provedor fica isolado aqui.
  */
-export async function fetchYahoo(ticker: string, fromDate: string, now = new Date()): Promise<YahooResult> {
+export async function fetchYahoo(symbol: string, fromDate: string, now = new Date()): Promise<YahooResult> {
   const p1 = Math.floor(Date.parse(fromDate + "T00:00:00Z") / 1000);
   const p2 = Math.floor(now.getTime() / 1000) + 86400;
-  const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(ticker)}.SA?period1=${p1}&period2=${p2}&interval=1d&events=div%7Csplit&includeAdjustedClose=true`;
+  const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?period1=${p1}&period2=${p2}&interval=1d&events=div%7Csplit&includeAdjustedClose=true`;
   const res = await fetch(url, { headers: { "User-Agent": "Mozilla/5.0 (compatible; bolsa-app)" }, cache: "no-store" });
-  if (!res.ok) throw new Error(`Yahoo ${ticker}: HTTP ${res.status}`);
+  if (!res.ok) throw new Error(`Yahoo ${symbol}: HTTP ${res.status}`);
   const json = await res.json();
   const r = json?.chart?.result?.[0];
-  if (!r?.timestamp) throw new Error(`Yahoo ${ticker}: sem dados (${json?.chart?.error?.description ?? "resposta vazia"})`);
+  if (!r?.timestamp) throw new Error(`Yahoo ${symbol}: sem dados (${json?.chart?.error?.description ?? "resposta vazia"})`);
   const off: number = r.meta?.gmtoffset ?? BRT_OFFSET_MIN * 60;
   const toDate = (ts: number) => new Date((ts + off) * 1000).toISOString().slice(0, 10);
   const q = r.indicators.quote[0];

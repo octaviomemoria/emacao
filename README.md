@@ -71,6 +71,14 @@ Para ativar no Supabase, rode `supabase/migrations/0002_pregao.sql` no SQL Edito
 ## Carteiras simuladas
 Na tela **Simuladas** você cria quantas carteiras quiser, cada uma com **nome, capital inicial e parâmetros próprios** (deslizamento, participação no volume, emolumentos, corretagem e alerta de gap). Cada carteira opera como o pregão simulado (ordens digitadas, execução no pregão seguinte) e é independente das outras, da carteira padrão e da carteira real. Você pode alterar os parâmetros e zerar cada carteira. Os alertas de execução trazem o nome da carteira entre colchetes.
 
+## Ações estrangeiras
+Em **Configurações** você pode incluir ações americanas (ex.: AAPL, BRK-B) na lista **Exterior**. A cotação em dólar vem do Yahoo e é convertida para reais pelo câmbio do dia (`BRL=X`).
+- **Onde aparecem:** no Radar, na tela de cada ativo, na carteira real e nas carteiras simuladas. **Não** entram na simulação automática, que aplica uma só alíquota de IR.
+- **IR separado:** 15% sobre o ganho mensal, sem a isenção de R$ 20 mil e sem compensar com prejuízos da B3. Aparece em **Carteira**, em tabela própria.
+- **Carteira real:** registre o preço já convertido pelo câmbio da operação, em reais.
+- **Feriados diferentes:** uma ordem sem pregão no mercado do ativo espera até 5 dias corridos por um pregão com dados.
+- **Não modelado:** dividendos e a retenção de 30% na fonte, o spread e o IOF do câmbio da corretora.
+
 As carteiras usam a migração `supabase/migrations/0003_carteiras_simuladas.sql`, que deve ser rodada depois da 0002.
 
 ## Limites conhecidos

@@ -154,11 +154,14 @@ export function PushButton({ enabled }: { enabled: boolean }) {
 
 export function AssetsForm({ assets }: { assets: Asset[] }) {
   const [r, act, pending] = useActionState(saveAssets, null as R);
+  const b3 = assets.filter((a) => a.market !== "EXT");
+  const ext = assets.filter((a) => a.market === "EXT");
   return (
-    <form action={act} className="flex flex-col gap-2">
-      <textarea name="tickers" rows={4} defaultValue={assets.map((a) => a.ticker).join(" ")} className="font-mono text-xs" />
+    <form action={act} className="flex flex-col gap-3">
+      <L label="B3"><textarea name="tickers" rows={4} defaultValue={b3.map((a) => a.ticker).join(" ")} className="font-mono text-xs" /></L>
+      <L label="Exterior (ações americanas, em dólar; o app converte para reais pelo câmbio do dia)"><textarea name="exterior" rows={2} defaultValue={ext.map((a) => a.ticker).join(" ")} className="font-mono text-xs" placeholder="AAPL MSFT BRK-B" /></L>
       <div className="flex items-center gap-3"><button className="btn" disabled={pending}>Salvar lista</button><Msg r={r} />
-        <span className="text-xs opacity-60">Separe por espaço. Ativos novos têm só o histórico baixado a partir da próxima atualização. Evite papéis ilíquidos: o backtest só cobriu estes {assets.length}.</span></div>
+        <span className="text-xs opacity-60">Separe por espaço. Ativos novos têm só o histórico baixado a partir da próxima atualização. Evite papéis ilíquidos: o backtest só cobriu os da B3 ({b3.length}).</span></div>
     </form>
   );
 }

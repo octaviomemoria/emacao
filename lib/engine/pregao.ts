@@ -63,8 +63,11 @@ export interface PregaoState {
   lastDate: string;
   cash: number;
   positions: PregaoPosition[];
-  realizedMonth: number; // resultado realizado no mês corrente (R$, antes do IR)
-  lossCarry: number; // prejuízo a compensar (R$)
+  realizedMonth: number; // resultado realizado da B3 no mês corrente (R$, antes do IR)
+  lossCarry: number; // prejuízo da B3 a compensar (R$)
+  // exterior: apuração separada (sem compensação com a B3). Ausente em estados anteriores às ações estrangeiras
+  realizedMonthExt?: number;
+  lossCarryExt?: number;
   taxPaidTotal: number;
   feesPaidTotal: number;
   cdiIndex: number;
@@ -91,6 +94,9 @@ export const DEFAULT_PREGAO: PregaoSettings = {
   impactEta: 0.5,
 };
 
+/** ordem de um ativo espera este número de dias corridos por um pregão com dados (feriado no mercado do ativo) */
+export const MAX_WAIT_DAYS = 5;
+
 /** barra bruta do pregão de um ativo, com o fechamento do pregão anterior */
 export interface DayInput {
   bar: { open: number; high: number; low: number; close: number; volume: number } | null;
@@ -99,6 +105,7 @@ export interface DayInput {
   anomaly: boolean; // dado suspeito: variação ajustada acima do limite, ou salto bruto sem evento de desdobramento
   adv?: number; // volume médio diário dos pregões anteriores (impacto de mercado)
   sigma?: number; // volatilidade diária dos pregões anteriores (impacto de mercado)
+  exterior?: boolean; // ação estrangeira: o resultado entra na apuração separada do IR
 }
 
 export interface FillResult {
@@ -168,6 +175,8 @@ export function newPregaoState(startDate: string, capital: number): PregaoState 
     positions: [],
     realizedMonth: 0,
     lossCarry: 0,
+    realizedMonthExt: 0,
+    lossCarryExt: 0,
     taxPaidTotal: 0,
     feesPaidTotal: 0,
     cdiIndex: 1,
@@ -178,7 +187,7 @@ export function newPregaoState(startDate: string, capital: number): PregaoState 
 /** aplica uma execução ao estado (caixa, posição, preço médio, resultado realizado) */
 export function applyExecution(
   st: PregaoState,
-  o: { ticker: string; side: OrderSide; qty: number; price: number; date: string },
+  o: { ticker: string; side: OrderSide; qty: number; price: number; date: string; exterior?: boolean },
   s: PregaoSettings,
 ): { fee: number; realized: number } {
   const gross = o.qty * o.price;
@@ -200,7 +209,8 @@ export function applyExecution(
   const proceeds = gross - fee;
   const realized = pos ? proceeds - pos.avgCost * o.qty : 0;
   st.cash += proceeds;
-  st.realizedMonth += realized;
+  if (o.exterior) st.realizedMonthExt = (st.realizedMonthExt ?? 0) + realized;
+  else st.realizedMonth += realized;
   if (pos) {
     pos.qty -= o.qty;
     pos.lastPrice = o.price;
@@ -218,21 +228,28 @@ export function applySplit(st: PregaoState, ticker: string, ratio: number) {
   pos.lastPrice = pos.lastPrice / ratio;
 }
 
-/** IR mensal sobre o resultado realizado, com compensação de prejuízo (mesma regra do motor automático) */
-export function settleTaxIfNewMonth(st: PregaoState, date: string, taxRate: number) {
+/** um mercado num mês: lucro é tributado depois de usar o prejuízo acumulado; prejuízo vai para a compensação */
+function settleMarket(realized: number, carry: number, rate: number): { carry: number; tax: number } {
+  if (realized > 0) {
+    const use = Math.min(carry, realized);
+    return { carry: carry - use, tax: rate * (realized - use) };
+  }
+  return { carry: carry + Math.max(0, -realized), tax: 0 };
+}
+
+/** IR mensal sobre o resultado realizado de cada mercado, com compensação separada (B3 e exterior não se compensam) */
+export function settleTaxIfNewMonth(st: PregaoState, date: string, taxRate: number, foreignTaxRate = taxRate) {
   const m = (d: string) => d.slice(0, 7);
   if (m(date) === m(st.lastDate)) return;
-  const r = st.realizedMonth;
-  if (r > 0) {
-    const use = Math.min(st.lossCarry, r);
-    st.lossCarry -= use;
-    const tax = taxRate * (r - use);
-    st.cash -= tax;
-    st.taxPaidTotal += tax;
-  } else if (r < 0) {
-    st.lossCarry += -r;
-  }
+  const b3 = settleMarket(st.realizedMonth, st.lossCarry, taxRate);
+  const ext = settleMarket(st.realizedMonthExt ?? 0, st.lossCarryExt ?? 0, foreignTaxRate);
+  const tax = b3.tax + ext.tax;
+  st.lossCarry = b3.carry;
+  st.lossCarryExt = ext.carry;
+  st.cash -= tax;
+  st.taxPaidTotal += tax;
   st.realizedMonth = 0;
+  st.realizedMonthExt = 0;
 }
 
 export interface OrderOutcome {
@@ -252,10 +269,10 @@ export function processPregaoDay(
   date: string,
   inputs: Map<string, DayInput | undefined>,
   s: PregaoSettings,
-  rates: { cdiRate: number; cdiTaxRate: number; taxRate: number },
+  rates: { cdiRate: number; cdiTaxRate: number; taxRate: number; foreignTaxRate?: number },
   newId: () => string,
 ): { orders: PregaoOrder[]; fills: PregaoFill[]; outcomes: OrderOutcome[] } {
-  settleTaxIfNewMonth(st, date, rates.taxRate);
+  settleTaxIfNewMonth(st, date, rates.taxRate, rates.foreignTaxRate ?? rates.taxRate);
 
   const outcomes: OrderOutcome[] = [];
   const allFills: PregaoFill[] = [];
@@ -266,7 +283,11 @@ export function processPregaoDay(
   for (const o of eligible) {
     if (!inputs.has(o.ticker)) continue; // sem dados do ativo nesta rodada: fica aberta
     const input = inputs.get(o.ticker);
+    // sem candle nesta sessão (feriado no mercado do ativo): a ordem espera por um pregão com dados
+    const noBar = !input?.bar;
+    if (noBar && calendarDays(o.createdDate, date) <= MAX_WAIT_DAYS) continue;
     let fill = fillOrder(o, input, s);
+    if (noBar) fill = { ...fill, reason: `sem negociação por mais de ${MAX_WAIT_DAYS} dias` };
     let qty = fill.qty;
     const fills: PregaoFill[] = [];
 
@@ -286,7 +307,7 @@ export function processPregaoDay(
     }
 
     if (qty > 0 && input?.bar) {
-      applyExecution(st, { ticker: o.ticker, side: o.side, qty, price: fill.price, date }, s);
+      applyExecution(st, { ticker: o.ticker, side: o.side, qty, price: fill.price, date, exterior: input.exterior }, s);
       const fee = feeOf(qty, fill.price, s);
       fills.push({ id: newId(), orderId: o.id, date, ticker: o.ticker, side: o.side, qty, price: fill.price, fees: fee });
     }
@@ -325,6 +346,8 @@ export function processPregaoDay(
 }
 
 export const pregaoEquity = (st: PregaoState) => st.cash + st.positions.reduce((a, p) => a + p.qty * p.lastPrice, 0);
+
+const calendarDays = (from: string, to: string) => (Date.parse(to) - Date.parse(from)) / 86400000;
 
 /** candle bruto mais recente anterior a `date` (para estimativas na tela) */
 export function lastRawClose(candles: Candle[]): number {

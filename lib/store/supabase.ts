@@ -1,5 +1,6 @@
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import type { Candle, SimState } from "@/lib/engine/types";
+import type { FxMap } from "@/lib/engine/fx";
 import {
   DEFAULT_ASSETS, DEFAULT_SETTINGS,
   type AlertItem, type Asset, type Carteira, type Channels, type JobLogEntry, type PushSub, type Settings, type Snapshot, type Store, type Tx,
@@ -49,6 +50,8 @@ export class SupabaseStore implements Store {
   }
   getCdi() { return this.kvGet<Record<string, number>>("cdi", {}); }
   saveCdi(c: Record<string, number>) { return this.kvSet("cdi", c); }
+  getFx() { return this.kvGet<FxMap>("fx", {}); }
+  saveFx(fx: FxMap) { return this.kvSet("fx", fx); }
   getSnapshot() { return this.kvGet<Snapshot | null>("snapshot", null); }
   saveSnapshot(s: Snapshot) { return this.kvSet("snapshot", s); }
   getSim() { return this.kvGet<SimState | null>("sim", null); }

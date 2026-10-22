@@ -7,20 +7,22 @@ import { brl, dmy, mi, pct, spct, tone } from "@/lib/format";
 import { computeSeries } from "@/lib/engine/signals";
 import { PREGAO_DEFAULT, pregaoEquity } from "@/lib/engine/pregao";
 import { getStore } from "@/lib/store";
+import { isExterior, TICKER_RE } from "@/lib/tickers";
 
 export const dynamic = "force-dynamic";
 
 export default async function Ativo({ params }: { params: Promise<{ ticker: string }> }) {
   const { ticker: raw } = await params;
   const T = raw.toUpperCase();
-  if (!/^[A-Z0-9]{4,6}$/.test(T)) notFound();
+  if (!TICKER_RE.test(T)) notFound();
 
   const store = await getStore();
-  const [snap, settings, carteiras, candles] = await Promise.all([
-    store.getSnapshot(), store.getSettings(), store.listCarteiras(), store.getPrices(T),
+  const [snap, settings, carteiras, candles, assets] = await Promise.all([
+    store.getSnapshot(), store.getSettings(), store.listCarteiras(), store.getPrices(T), store.getAssets(),
   ]);
   const sig = snap?.signals.find((s) => s.ticker === T);
   if (!sig && !candles.length) notFound();
+  const exterior = isExterior(assets.find((a) => a.ticker === T) ?? {});
   const p = settings.params;
   const last = candles[candles.length - 1];
   const refPrice = last ? (last.raw?.close ?? last.close) : sig?.price ?? 0;
@@ -80,6 +82,7 @@ export default async function Ativo({ params }: { params: Promise<{ ticker: stri
           <h1 className="text-lg font-semibold">{T}</h1>
           <p className="text-xs opacity-60">
             {last ? <>Último pregão {dmy(last.date)} · preço bruto {brl(refPrice)}</> : "Sem preços salvos"}
+            {exterior && <> · ação estrangeira: cotação em dólar convertida para R$ pelo câmbio do dia</>}
           </p>
         </div>
         <Link href="/radar" className="text-xs underline">← voltar ao Radar</Link>

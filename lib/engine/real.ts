@@ -46,6 +46,9 @@ function lastWeekdayOfNextMonth(month: string): string {
   return d.toISOString().slice(0, 10);
 }
 
+/** alíquota do ganho em ações estrangeiras (sem a isenção de R$ 20 mil, que vale só para ações da B3) */
+export const FOREIGN_TAX_RATE = 0.15;
+
 export function taxMonths(txs: RealTx[], opts: { etfs: string[]; useExemption: boolean; rate: number }): TaxMonth[] {
   const state = new Map<string, { qty: number; cost: number }>();
   const months = new Map<string, { salesStock: number; salesEtf: number; gainStock: number; gainEtf: number; dt: boolean }>();
@@ -96,4 +99,15 @@ export function taxMonths(txs: RealTx[], opts: { etfs: string[]; useExemption: b
     });
   }
   return out;
+}
+
+/**
+ * IR separado por mercado: B3 (com isenção e ETFs, se ligadas nas configurações) e exterior
+ * (15% sobre o ganho, sem isenção e com prejuízo próprio: o prejuízo na B3 não compensa lucro no exterior).
+ */
+export function taxByMarket(txs: RealTx[], exterior: Set<string>, opts: { etfs: string[]; useExemption: boolean; rate: number }) {
+  return {
+    b3: taxMonths(txs.filter((t) => !exterior.has(t.ticker)), opts),
+    exterior: taxMonths(txs.filter((t) => exterior.has(t.ticker)), { etfs: [], useExemption: false, rate: FOREIGN_TAX_RATE }),
+  };
 }
